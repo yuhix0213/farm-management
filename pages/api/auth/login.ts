@@ -1,6 +1,5 @@
 // pages/api/auth/login.ts
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { serialize } from 'cookie'
 import crypto from 'crypto'
 
 const SESSION_COOKIE = 'farm_session'
@@ -38,13 +37,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const validUser = process.env.ADMIN_USERNAME
   const validPass = process.env.ADMIN_PASSWORD
 
-  // 環境変数が未設定の場合
   if (!validUser || !validPass) {
     console.error('ADMIN_USERNAME or ADMIN_PASSWORD is not set')
     return res.status(500).json({ message: 'サーバー設定エラー: 認証情報が未設定です' })
   }
 
-  // 文字列として単純比較（長さが違う場合のクラッシュを防ぐ）
   const userOk = String(username ?? '') === String(validUser)
   const passOk = String(password ?? '') === String(validPass)
 
@@ -53,14 +50,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ message: 'ユーザー名またはパスワードが正しくありません' })
   }
 
-  const token = createSessionToken(String(username))
-  res.setHeader('Set-Cookie', serialize(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure:   process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path:     '/',
-    maxAge:   MAX_AGE,
-  }))
+  const token   = createSessionToken(String(username))
+  const cookie  = `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${MAX_AGE}; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
+  res.setHeader('Set-Cookie', cookie)
 
   return res.status(200).json({ ok: true })
 }
