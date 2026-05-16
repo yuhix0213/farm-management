@@ -1,12 +1,8 @@
-// pages/api/auth/logout.ts — ログアウトAPI（Cookieを無効化）
+// pages/api/auth/logout.ts
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { serialize } from 'cookie'
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end()
-  res.setHeader('Set-Cookie', serialize('farm_session', '', {
-    httpOnly: true, secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax', path: '/', maxAge: 0, expires: new Date(0),
-  }))
+  res.setHeader('Set-Cookie', 'farm_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax')
   return res.status(200).json({ ok: true })
 }
