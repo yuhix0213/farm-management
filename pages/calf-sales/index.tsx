@@ -1,7 +1,6 @@
-// pages/calf-sales/index.tsx — 子牛販売市場（落札情報更新・PDF出力・レスポンシブ）
+// pages/calf-sales/index.tsx — 子牛販売市場（新規登録・編集・PDF出力・レスポンシブ）
 import { useEffect, useState } from 'react'
 import Head from 'next/head'
-import { useRouter } from 'next/router'
 
 const S = {
   label:  { display:'block' as const, fontSize:12, color:'#555', marginBottom:4 },
@@ -12,15 +11,22 @@ const statusColor: Record<string,[string,string]> = {
   '完了':['#1D9E75','#E1F5EE'],'予定':['#BA7517','#FAEEDA'],'登録済':['#378ADD','#E6F1FB'],
 }
 
+const blankForm = {
+  ear_tag_no:'', mother_ear_tag:'', breed:'ホルスタイン', sex:'雄',
+  date_of_birth:'', weight_kg:'', market:'', sale_date:'', price:'', buyer:'', status:'登録済',
+}
+
 export default function CalfSalesPage() {
-  const router = useRouter()
-  const [sales,    setSales]   = useState<any[]>([])
-  const [loading,  setLoading] = useState(true)
-  const [pdfMonth, setPdfMonth]= useState(new Date().toISOString().slice(0,7))
-  const [editId,   setEditId]  = useState<number|null>(null)
-  const [editForm, setEditForm]= useState<any>({})
-  const [saving,   setSaving]  = useState(false)
-  const [msg,      setMsg]     = useState('')
+  const [sales,    setSales]    = useState<any[]>([])
+  const [loading,  setLoading]  = useState(true)
+  const [pdfMonth, setPdfMonth] = useState(new Date().toISOString().slice(0,7))
+  const [editId,   setEditId]   = useState<number|null>(null)
+  const [editForm, setEditForm] = useState<any>({})
+  const [saving,   setSaving]   = useState(false)
+  const [msg,      setMsg]      = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [newForm,  setNewForm]  = useState<any>(blankForm)
+  const [adding,   setAdding]   = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -30,12 +36,40 @@ export default function CalfSalesPage() {
   }
   useEffect(()=>{ load() },[])
 
-  const startEdit = (s:any) => {
-    setEditId(s.id)
-    setEditForm({ market:s.market||'', sale_date:s.sale_date||'', price:s.price||'', buyer:s.buyer||'', status:s.status||'登録済', date_of_birth:s.date_of_birth||'' })
-    setMsg('')
+  const setN = (k:string,v:any) => setNewForm((f:any)=>({...f,[k]:v}))
+
+  // 新規登録
+  const handleAdd = async () => {
+    if (!newForm.ear_tag_no.trim()) { setMsg('子牛耳標番号は必須です'); return }
+    setAdding(true); setMsg('')
+    const ageDays = newForm.date_of_birth
+      ? Math.round((Date.now()-new Date(newForm.date_of_birth).getTime())/86400000)
+      : null
+    try {
+      const res = await fetch('/api/calf-sales',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          ...newForm,
+          age_days:   ageDays,
+          weight_kg:  newForm.weight_kg  ? Number(newForm.weight_kg)  : null,
+          price:      newForm.price      ? Number(newForm.price)       : null,
+          sale_date:  newForm.sale_date  || null,
+          mother_ear_tag: newForm.mother_ear_tag || null,
+          market:     newForm.market     || null,
+          buyer:      newForm.buyer      || null,
+        }),
+      })
+      if (res.ok) { setShowForm(false); setNewForm(blankForm); load() }
+      else { const d=await res.json(); setMsg(d.error||'登録に失敗しました') }
+    } catch { setMsg('通信エラー') } finally { setAdding(false) }
   }
 
+  // 落札情報編集
+  const startEdit = (s:any) => {
+    setEditId(s.id)
+    setEditForm({ market:s.market||'', sale_date:s.sale_date||'', price:s.price||'', buyer:s.buyer||'', status:s.status||'登録済' })
+    setMsg(''); setShowForm(false)
+  }
   const handleSave = async () => {
     setSaving(true); setMsg('')
     try {
@@ -48,10 +82,10 @@ export default function CalfSalesPage() {
     } catch { setMsg('通信エラー') } finally { setSaving(false) }
   }
 
-  const total     = sales.filter(s=>s.status==='完了'&&s.price).reduce((a,s)=>a+Number(s.price),0)
-  const months    = [...new Set(sales.filter(s=>s.sale_date).map(s=>s.sale_date.slice(0,7)))].sort().reverse()
-  const filtered  = sales.filter(s=>s.sale_date?.startsWith(pdfMonth)&&s.status==='完了')
-  const monthTotal= filtered.reduce((a,s)=>a+Number(s.price||0),0)
+  const total      = sales.filter(s=>s.status==='完了'&&s.price).reduce((a,s)=>a+Number(s.price),0)
+  const months     = [...new Set(sales.filter(s=>s.sale_date).map((s:any)=>s.sale_date.slice(0,7)))].sort().reverse()
+  const filtered   = sales.filter(s=>s.sale_date?.startsWith(pdfMonth)&&s.status==='完了')
+  const monthTotal = filtered.reduce((a,s)=>a+Number(s.price||0),0)
 
   const generatePDF = () => {
     const [y,m] = pdfMonth.split('-')
@@ -106,16 +140,100 @@ export default function CalfSalesPage() {
     <>
       <Head><title>子牛販売市場 | 牧場管理システム</title></Head>
       <style>{`@media(max-width:640px){.tbl{display:none!important}.cds{display:flex!important}}@media(min-width:641px){.cds{display:none!important}}`}</style>
-      <main style={{padding:16,fontFamily:'sans-serif',background:'#F0F4F8',minHeight:'calc(100vh - 48px)'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:8}}>
-          <h1 style={{fontSize:18,fontWeight:600,color:'#1D3557',margin:0}}>子牛販売市場</h1>
-          <button onClick={()=>router.push('/')} style={{padding:'7px 14px',borderRadius:8,border:'1px solid #C8D0DC',background:'#fff',cursor:'pointer',fontSize:13}}>← 戻る</button>
-        </div>
+
+      {/* ページヘッダー */}
+      <div style={{background:'#fff',borderBottom:'0.5px solid #E0E6ED',padding:'11px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:48,zIndex:10}}>
+        <span style={{fontSize:15,fontWeight:500,color:'#111827'}}>子牛販売市場</span>
+        <button onClick={()=>{setShowForm(!showForm);setEditId(null);setMsg('')}}
+          style={{padding:'7px 16px',borderRadius:8,background:showForm?'#F3F4F6':'#1D9E75',color:showForm?'#374151':'#fff',border:'none',cursor:'pointer',fontSize:13,fontWeight:600}}>
+          {showForm?'✕ 閉じる':'＋ 子牛登録'}
+        </button>
+      </div>
+
+      <main style={{padding:16,fontFamily:'sans-serif',background:'#F3F4F6',minHeight:'calc(100vh - 96px)'}}>
+
+        {/* ── 新規登録フォーム ── */}
+        {showForm && (
+          <div style={{background:'#fff',borderRadius:12,border:'2px solid #1D9E75',padding:20,marginBottom:16}}>
+            <h2 style={{fontSize:15,fontWeight:600,color:'#1D3557',marginBottom:6}}>子牛新規登録</h2>
+            <div style={{fontSize:12,color:'#6B7280',marginBottom:14}}>
+              ※ 分娩登録からの自動追加以外に、直接登録する場合に使用してください
+            </div>
+            {msg && <div style={{background:'#FCEBEB',border:'1px solid #F09595',borderRadius:8,padding:'8px 12px',marginBottom:12,fontSize:13,color:'#A32D2D'}}>{msg}</div>}
+
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'0 16px'}}>
+              {/* 必須項目 */}
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>子牛耳標番号 *</label>
+                <input style={S.input} value={newForm.ear_tag_no} onChange={e=>setN('ear_tag_no',e.target.value)} placeholder="例: 3012-0310"/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>母牛耳標番号</label>
+                <input style={S.input} value={newForm.mother_ear_tag} onChange={e=>setN('mother_ear_tag',e.target.value)} placeholder="例: 3012-0118"/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>品種</label>
+                <select style={S.select} value={newForm.breed} onChange={e=>setN('breed',e.target.value)}>
+                  {['ホルスタイン','黒毛和種','ホルスタイン×黒毛和種','褐毛和種','交雑種'].map(b=><option key={b}>{b}</option>)}
+                </select>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>性別</label>
+                <select style={S.select} value={newForm.sex} onChange={e=>setN('sex',e.target.value)}>
+                  {['雄','雌','去勢'].map(s=><option key={s}>{s}</option>)}
+                </select>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>生年月日</label>
+                <input type="date" style={S.input} value={newForm.date_of_birth} onChange={e=>setN('date_of_birth',e.target.value)}/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>体重 (kg)</label>
+                <input type="number" style={S.input} value={newForm.weight_kg} onChange={e=>setN('weight_kg',e.target.value)} placeholder="85"/>
+              </div>
+
+              {/* 販売情報（任意） */}
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>上場市場</label>
+                <input style={S.input} value={newForm.market} onChange={e=>setN('market',e.target.value)} placeholder="例: 網走家畜市場"/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>上場日</label>
+                <input type="date" style={S.input} value={newForm.sale_date} onChange={e=>setN('sale_date',e.target.value)}/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>落札額 (円)</label>
+                <input type="number" style={S.input} value={newForm.price} onChange={e=>setN('price',e.target.value)} placeholder="385000"/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>落札者</label>
+                <input style={S.input} value={newForm.buyer} onChange={e=>setN('buyer',e.target.value)} placeholder="例: ○○牧場"/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>ステータス</label>
+                <select style={S.select} value={newForm.status} onChange={e=>setN('status',e.target.value)}>
+                  {['登録済','予定','完了'].map(st=><option key={st}>{st}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:4}}>
+              <button onClick={()=>{setShowForm(false);setNewForm(blankForm);setMsg('')}}
+                style={{padding:'8px 18px',borderRadius:8,border:'1px solid #C8D0DC',background:'#fff',cursor:'pointer',fontSize:13}}>
+                キャンセル
+              </button>
+              <button onClick={handleAdd} disabled={adding}
+                style={{padding:'8px 22px',borderRadius:8,background:adding?'#A8D5C2':'#1D9E75',color:'#fff',border:'none',cursor:adding?'not-allowed':'pointer',fontSize:13,fontWeight:600}}>
+                {adding?'登録中...':'登録する'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* サマリー */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:10,marginBottom:14}}>
           {[['登録頭数',sales.length+'頭','#1D3557'],['落札済',sales.filter(s=>s.status==='完了').length+'頭','#1D9E75'],['累計売上','¥'+total.toLocaleString(),'#534AB7']].map(([l,v,col])=>(
-            <div key={l} style={{background:'#fff',borderRadius:10,border:'0.5px solid #D0D7E0',padding:'12px 14px'}}>
+            <div key={l as string} style={{background:'#fff',borderRadius:10,border:'0.5px solid #D0D7E0',padding:'12px 14px'}}>
               <div style={{fontSize:11,color:'#888'}}>{l}</div>
               <div style={{fontSize:18,fontWeight:600,color:col as string,marginTop:2}}>{v}</div>
             </div>
@@ -128,7 +246,7 @@ export default function CalfSalesPage() {
           <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
             <select value={pdfMonth} onChange={e=>setPdfMonth(e.target.value)}
               style={{padding:'7px 10px',borderRadius:8,border:'1px solid #5DCAA5',background:'#fff',fontSize:13}}>
-              {(months.length>0?months:['2026-05','2026-04']).map(mo=>{
+              {(months.length>0?months as string[]:['2026-05','2026-04']).map((mo:string)=>{
                 const [y,m2]=mo.split('-')
                 return <option key={mo} value={mo}>{y}年{parseInt(m2)}月</option>
               })}
@@ -142,8 +260,7 @@ export default function CalfSalesPage() {
           <div style={{fontSize:11,color:'#0F6E56',marginTop:8}}>※ HTMLをダウンロード後、ブラウザで開いて印刷（PDF保存）してください</div>
         </div>
 
-        {msg && <div style={{background:'#FCEBEB',border:'1px solid #F09595',borderRadius:8,padding:'8px 12px',marginBottom:12,fontSize:13,color:'#A32D2D'}}>{msg}</div>}
-
+        {msg && !showForm && <div style={{background:'#FCEBEB',border:'1px solid #F09595',borderRadius:8,padding:'8px 12px',marginBottom:12,fontSize:13,color:'#A32D2D'}}>{msg}</div>}
         {loading && <div style={{color:'#888',textAlign:'center',padding:32}}>読み込み中...</div>}
 
         {!loading && (
@@ -157,7 +274,7 @@ export default function CalfSalesPage() {
                   ))}
                 </tr></thead>
                 <tbody>
-                  {sales.length===0&&<tr><td colSpan={12} style={{padding:32,textAlign:'center',color:'#888'}}>販売記録がありません</td></tr>}
+                  {sales.length===0&&<tr><td colSpan={12} style={{padding:32,textAlign:'center',color:'#888'}}>販売記録がありません。「＋ 子牛登録」から追加してください。</td></tr>}
                   {sales.map((s,i)=>{
                     const [col,bg]=statusColor[s.status]??['#888','#eee']
                     const isEditing = editId===s.id
@@ -205,6 +322,7 @@ export default function CalfSalesPage() {
 
             {/* スマホ: カード */}
             <div className="cds" style={{flexDirection:'column',gap:10}}>
+              {sales.length===0&&<div style={{textAlign:'center',color:'#888',padding:32,background:'#fff',borderRadius:12}}>販売記録がありません</div>}
               {sales.map(s=>{
                 const [col,bg]=statusColor[s.status]??['#888','#eee']
                 const isEditing=editId===s.id
@@ -218,10 +336,12 @@ export default function CalfSalesPage() {
                       <>
                         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:13,marginBottom:10}}>
                           {[['母牛',s.mother_ear_tag||'—'],['品種',s.breed||'—'],['性別',s.sex||'—'],['日齢',s.age_days?s.age_days+'日':'—'],['体重',s.weight_kg?s.weight_kg+'kg':'—'],['上場市場',s.market||'—'],['上場日',s.sale_date||'—'],['落札額',s.price?'¥'+Number(s.price).toLocaleString():'—'],['落札者',s.buyer||'—']].map(([l,v])=>(
-                            <div key={l}><span style={{fontSize:11,color:'#888'}}>{l}</span><div>{v}</div></div>
+                            <div key={l as string}><span style={{fontSize:11,color:'#888'}}>{l}</span><div>{v}</div></div>
                           ))}
                         </div>
-                        <button onClick={()=>startEdit(s)} style={{width:'100%',padding:'8px',borderRadius:8,border:'1px solid #1D9E75',color:'#1D9E75',background:'#fff',cursor:'pointer',fontSize:13,fontWeight:600}}>編集（落札情報を入力）</button>
+                        <button onClick={()=>startEdit(s)} style={{width:'100%',padding:'8px',borderRadius:8,border:'1px solid #1D9E75',color:'#1D9E75',background:'#fff',cursor:'pointer',fontSize:13,fontWeight:600}}>
+                          ✏️ 落札情報を編集
+                        </button>
                       </>
                     )}
                     {isEditing && (
@@ -231,7 +351,7 @@ export default function CalfSalesPage() {
                           <div><label style={S.label}>上場日</label><input type="date" style={S.input} value={editForm.sale_date} onChange={e=>setEditForm((f:any)=>({...f,sale_date:e.target.value}))}/></div>
                           <div><label style={S.label}>落札額(円)</label><input type="number" style={S.input} value={editForm.price} onChange={e=>setEditForm((f:any)=>({...f,price:e.target.value}))}/></div>
                           <div><label style={S.label}>落札者</label><input style={S.input} value={editForm.buyer} onChange={e=>setEditForm((f:any)=>({...f,buyer:e.target.value}))}/></div>
-                          <div><label style={S.label}>ステータス</label>
+                          <div style={{gridColumn:'span 2'}}><label style={S.label}>ステータス</label>
                             <select style={S.select} value={editForm.status} onChange={e=>setEditForm((f:any)=>({...f,status:e.target.value}))}>
                               {['登録済','予定','完了'].map(st=><option key={st}>{st}</option>)}
                             </select>
