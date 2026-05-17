@@ -115,26 +115,58 @@ function HealthForm({cattleId,onSave,onClose}:{cattleId:number,onSave:(f:any)=>v
 }
 
 function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],healthRecords:any[]}) {
-  const [aiResult,setAiResult] = useState<any>(null)
+  // チャット履歴をlocalStorageに永続化（個体IDごとにキーを分ける）
+  const storageKey = `ai_chat_${cattle.id}`
+  const storageResultKey = `ai_result_${cattle.id}`
+
+  const loadStored = () => {
+    try {
+      const stored = localStorage.getItem(storageKey)
+      return stored ? JSON.parse(stored) : []
+    } catch { return [] }
+  }
+  const loadStoredResult = () => {
+    try {
+      const stored = localStorage.getItem(storageResultKey)
+      return stored ? JSON.parse(stored) : null
+    } catch { return null }
+  }
+
+  const [aiResult,setAiResult] = useState<any>(loadStoredResult)
   const [loading,setLoading]   = useState(false)
-  const [messages,setMessages] = useState<any[]>([])
+  const [messages,setMessages] = useState<any[]>(loadStored)
   const [input,setInput]       = useState("")
   const [chatLoading,setChatLoading] = useState(false)
+  const [dotCount,setDotCount]  = useState(1)  // アニメーション用
+
+  // 送信中のドットアニメーション
+  useEffect(()=>{
+    if(!chatLoading&&!loading) return
+    const timer = setInterval(()=>setDotCount(d=>(d%3)+1),500)
+    return ()=>clearInterval(timer)
+  },[chatLoading,loading])
+
+  // メッセージ変更時にlocalStorageへ保存
+  useEffect(()=>{
+    try { localStorage.setItem(storageKey, JSON.stringify(messages)) } catch {}
+  },[messages,storageKey])
+
+  // 診断結果変更時にlocalStorageへ保存
+  useEffect(()=>{
+    try {
+      if(aiResult) localStorage.setItem(storageResultKey, JSON.stringify(aiResult))
+    } catch {}
+  },[aiResult,storageResultKey])
 
   const lw         = [...weights].filter((w:any)=>w.cattle_id===cattle.id).sort((a:any,b:any)=>b.measured_at.localeCompare(a.measured_at))[0]
   const lastHealth = [...healthRecords].filter((h:any)=>h.cattle_id===cattle.id).sort((a:any,b:any)=>b.record_date.localeCompare(a.record_date))[0]
   const weather = WEATHER
 
-  const weatherStr = `【気象情報（網走市）】現在気温:${weather.current.temp}℃/体感:${weather.current.apparent}℃/湿度:${weather.current.humidity}%/風速:${weather.current.wind}km/h/天気:${WMO_LABEL[weather.current.code]||"不明"}/向こう3日最高気温:${weather.daily.slice(0,3).map(d=>d.max+"℃").join("→")}/最低気温:${weather.daily.slice(0,3).map(d=>d.min+"℃").join("→")}/最大寒暖差:${Math.max(...weather.daily.slice(0,3).map(d=>d.max-d.min))}℃`
-  const cattleStr  = `個体番号:${cattle.farm_id}/品種:${cattle.breed}/性別:${cattle.sex}/月齢:${cattle.date_of_birth?calcAge(cattle.date_of_birth):"不明"}ヶ月/ステータス:${cattle.status}/特記:${cattle.note||"なし"}/最新体重:${lw?lw.weight_kg+"kg("+lw.measured_at+")":"未記録"}/日増体量:${lw?.adg_kg!=null?lw.adg_kg+"kg/日":"不明"}/BCS:${lw?.bcs??"不明"}/最新健康記録:${lastHealth?lastHealth.record_date+" "+lastHealth.record_type+(lastHealth.temperature?" 体温"+lastHealth.temperature+"℃":"")+" "+lastHealth.diagnosis:"なし"}`
-  const fullCtx    = cattleStr+" / "+weatherStr
-
-  const SYS_DIAG = `あなたは日本の畜産専門の獣医師AIアシスタントです。個体データと気象情報を総合的に分析し、JSONのみで返してください（コードブロック・前後文章不要）。フォーマット: {"risk":"low|mid|high","riskLabel":"低リスク|要観察|要対応","summary":"2文以内の総評","actions":["アクション1","アクション2","アクション3"],"detail":"詳細説明2〜3文","weatherImpact":"気象が健康に与える影響"}`
-  const SYS_CHAT  = `あなたは日本の畜産専門の獣医師AIアシスタントです。以下の個体データ・気象情報を踏まえて質問に200文字以内で答えてください。\n${fullCtx}`
-
   const runDiagnosis = async () => {
     setLoading(true); setAiResult(null); setMessages([])
     try {
+      localStorage.removeItem(storageKey)
+      localStorage.removeItem(storageResultKey)
       const res = await fetch("/api/ai/diagnosis",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cattleData:cattle,weatherData:weather})})
       const data = await res.json()
       const text = data.content?.text||""
@@ -142,9 +174,16 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
       setAiResult(parsed)
       setMessages([{role:"assistant",content:text}])
     } catch(e) {
-      setAiResult({risk:"low",riskLabel:"エラー",summary:"診断の取得に失敗しました。",actions:[],detail:"",weatherImpact:""})
+      setAiResult({risk:"low",riskLabel:"エラー",summary:"診断の取得に失敗しました。再試行してください。",actions:[],detail:"",weatherImpact:""})
     }
     setLoading(false)
+  }
+
+  const clearHistory = () => {
+    if(!window.confirm("このAI診断履歴を削除しますか？")) return
+    localStorage.removeItem(storageKey)
+    localStorage.removeItem(storageResultKey)
+    setMessages([]); setAiResult(null)
   }
 
   const sendChat = async () => {
@@ -156,11 +195,9 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
       const res = await fetch("/api/ai/diagnosis",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({cattleData:cattle,weatherData:weather,messages:newMsgs,mode:"chat"})})
       const data = await res.json()
-      // JSONが混入していた場合はプレーンテキストとして表示
       let replyText = data.content?.text || "回答を取得できませんでした。"
       try {
         const parsed = JSON.parse(replyText.replace(/```json|```/g,"").trim())
-        // チャットなのにJSONが返ってきた場合はsummaryを表示
         if (parsed.summary) replyText = parsed.summary + (parsed.detail?" "+parsed.detail:"")
       } catch { /* プレーンテキストならそのまま */ }
       setMessages((m:any)=>[...m,{role:"assistant",content:replyText}])
@@ -173,30 +210,46 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
   const riskColor = (r:string) => ({"high":"#E24B4A","mid":"#BA7517","low":"#1D9E75"}[r]||"#888")
   const riskBg    = (r:string) => ({"high":"#FCEBEB","mid":"#FAEEDA","low":"#E1F5EE"}[r]||"#eee")
   const QUICK = ["飼料の改善点を教えてください","出荷適期はいつ頃ですか？","体重増加が鈍い原因は？","ワクチンスケジュールを教えてください"]
+  const dots = ".".repeat(dotCount)
 
   return (
     <div>
-      <style>{`@keyframes aipulse{0%,80%,100%{opacity:.2}40%{opacity:1}}`}</style>
+      <style>{`
+        @keyframes aipulse{0%,80%,100%{opacity:.2}40%{opacity:1}}
+        @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+        @keyframes typingDot{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
+      `}</style>
+
+      {/* 気象バナー */}
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#E6F1FB",borderRadius:8,marginBottom:12,fontSize:12,flexWrap:"wrap"}}>
         <span style={{fontSize:18}}>{WMO_ICON[weather.current.code]||"🌤️"}</span>
         <span style={{color:"#0C447C",fontWeight:500}}>網走市 現在 {weather.current.temp}℃ / {WMO_LABEL[weather.current.code]||"—"}</span>
         <span style={{color:"#185FA5"}}>湿度 {weather.current.humidity}%</span>
         <span style={{marginLeft:"auto",color:"#185FA5",fontSize:11}}>✅ 診断に反映済み</span>
       </div>
+
+      {/* 未診断 */}
       {!aiResult&&!loading&&(
         <div style={{textAlign:"center",padding:"24px 0"}}>
           <div style={{fontSize:13,color:"#6B7280",marginBottom:16}}>個体データ＋気象情報をAIが総合分析し、健康リスクと推奨アクションを提案します</div>
           <button style={{...S.btnPrimary,padding:"10px 28px",fontSize:14}} onClick={runDiagnosis}>🩺 AI診断を開始する</button>
         </div>
       )}
+
+      {/* 診断中アニメーション */}
       {loading&&(
         <div style={{textAlign:"center",padding:"36px 0"}}>
-          <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:12}}>
-            {[0,1,2].map(i=><div key={i} style={{width:8,height:8,borderRadius:"50%",background:"#1D9E75",animation:`aipulse 1.2s ${i*0.2}s infinite`}}/>)}
+          <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:14}}>
+            {[0,1,2].map(i=>(
+              <div key={i} style={{width:10,height:10,borderRadius:"50%",background:"#1D9E75",animation:`typingDot 1.2s ${i*0.2}s ease-in-out infinite`}}/>
+            ))}
           </div>
-          <div style={{fontSize:13,color:"#6B7280"}}>個体データ＋気象情報を分析中...</div>
+          <div style={{fontSize:13,color:"#1D9E75",fontWeight:500}}>🩺 AI診断中{dots}</div>
+          <div style={{fontSize:11,color:"#9CA3AF",marginTop:6}}>個体データ・気象情報を分析しています。しばらくお待ちください</div>
         </div>
       )}
+
+      {/* 診断結果 */}
       {aiResult&&!loading&&(
         <div>
           <div style={{background:riskBg(aiResult.risk),border:`1px solid ${riskColor(aiResult.risk)}50`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
@@ -207,6 +260,7 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
             {aiResult.detail&&<div style={{fontSize:12,color:"#6B7280",lineHeight:1.6,marginBottom:aiResult.weatherImpact?6:0}}>{aiResult.detail}</div>}
             {aiResult.weatherImpact&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#185FA5",background:"#E6F1FB",padding:"5px 10px",borderRadius:6,marginTop:6}}><span>🌡️</span><span>{aiResult.weatherImpact}</span></div>}
           </div>
+
           {aiResult.actions?.length>0&&(
             <div style={{marginBottom:14}}>
               <div style={{fontSize:12,fontWeight:500,color:"#6B7280",marginBottom:8}}>推奨アクション</div>
@@ -218,28 +272,93 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
               ))}
             </div>
           )}
+
+          {/* 追加相談エリア */}
           <div style={{borderTop:"0.5px solid #E0E6ED",paddingTop:12,marginBottom:10}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:6}}>
               <span style={{fontSize:12,fontWeight:500,color:"#6B7280"}}>追加で相談する</span>
-              <button style={S.btnSm} onClick={runDiagnosis}>再診断</button>
+              <div style={{display:"flex",gap:6}}>
+                <button style={S.btnSm} onClick={runDiagnosis}>再診断</button>
+                <button style={{...S.btnSm,color:"#9CA3AF"}} onClick={clearHistory}>🗑️ 履歴削除</button>
+              </div>
             </div>
             <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
-              {QUICK.map(q=><div key={q} onClick={()=>!chatLoading&&setInput(q)} style={{fontSize:11,padding:"4px 12px",border:"0.5px solid #D1D5DB",borderRadius:99,cursor:"pointer",background:"#fff",color:"#6B7280"}}>{q}</div>)}
+              {QUICK.map(q=>(
+                <div key={q} onClick={()=>!chatLoading&&setInput(q)}
+                  style={{fontSize:11,padding:"4px 12px",border:"0.5px solid #D1D5DB",borderRadius:99,cursor:chatLoading?"not-allowed":"pointer",background:"#fff",color:chatLoading?"#D1D5DB":"#6B7280",transition:"all 0.15s"}}>
+                  {q}
+                </div>
+              ))}
             </div>
           </div>
+
+          {/* チャット履歴 */}
           {messages.slice(1).length>0&&(
             <div style={{marginBottom:10}}>
               {messages.slice(1).map((m:any,i:number)=>(
                 <div key={i} style={{display:"flex",gap:8,marginBottom:8,flexDirection:m.role==="user"?"row-reverse":"row"}}>
-                  <div style={{width:28,height:28,borderRadius:"50%",background:m.role==="user"?"#F3F4F6":"#E1F5EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>{m.role==="user"?"👤":"🩺"}</div>
-                  <div style={{maxWidth:"78%",padding:"9px 13px",borderRadius:10,fontSize:13,lineHeight:1.6,background:m.role==="user"?"#1D9E75":"#F9FAFB",color:m.role==="user"?"white":"#111827",border:m.role==="user"?"none":"0.5px solid #E0E6ED"}}>{m.content}</div>
+                  <div style={{width:28,height:28,borderRadius:"50%",background:m.role==="user"?"#F3F4F6":"#E1F5EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>
+                    {m.role==="user"?"👤":"🩺"}
+                  </div>
+                  <div style={{maxWidth:"78%",padding:"9px 13px",borderRadius:10,fontSize:13,lineHeight:1.6,background:m.role==="user"?"#1D9E75":"#F9FAFB",color:m.role==="user"?"white":"#111827",border:m.role==="user"?"none":"0.5px solid #E0E6ED"}}>
+                    {m.content}
+                  </div>
                 </div>
               ))}
+
+              {/* 回答中インジケーター */}
+              {chatLoading&&(
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <div style={{width:28,height:28,borderRadius:"50%",background:"#E1F5EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>🩺</div>
+                  <div style={{padding:"9px 16px",borderRadius:10,background:"#F9FAFB",border:"0.5px solid #E0E6ED",display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{display:"flex",gap:4}}>
+                      {[0,1,2].map(i=>(
+                        <div key={i} style={{width:7,height:7,borderRadius:"50%",background:"#1D9E75",animation:`typingDot 1.2s ${i*0.2}s ease-in-out infinite`}}/>
+                      ))}
+                    </div>
+                    <span style={{fontSize:12,color:"#6B7280"}}>回答を生成中{dots}</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
+
+          {/* チャット中インジケーター（履歴が空の場合） */}
+          {chatLoading&&messages.slice(1).length===0&&(
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <div style={{width:28,height:28,borderRadius:"50%",background:"#E1F5EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>🩺</div>
+              <div style={{padding:"9px 16px",borderRadius:10,background:"#F9FAFB",border:"0.5px solid #E0E6ED",display:"flex",alignItems:"center",gap:6}}>
+                <div style={{display:"flex",gap:4}}>
+                  {[0,1,2].map(i=>(
+                    <div key={i} style={{width:7,height:7,borderRadius:"50%",background:"#1D9E75",animation:`typingDot 1.2s ${i*0.2}s ease-in-out infinite`}}/>
+                  ))}
+                </div>
+                <span style={{fontSize:12,color:"#6B7280"}}>回答を生成中{dots}</span>
+              </div>
+            </div>
+          )}
+
+          {/* 入力エリア */}
           <div style={{display:"flex",gap:8}}>
-            <input style={{...S.input,flex:1}} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendChat()} placeholder="質問を入力... (Enter で送信)"/>
-            <button style={{...S.btnPrimary,padding:"7px 16px",opacity:chatLoading?0.6:1}} onClick={sendChat} disabled={chatLoading}>送信</button>
+            <input style={{...S.input,flex:1,opacity:chatLoading?0.7:1}}
+              value={input}
+              onChange={e=>setInput(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendChat()}
+              placeholder={chatLoading?"回答生成中...":"質問を入力... (Enter で送信)"}
+              disabled={chatLoading}
+            />
+            <button
+              style={{...S.btnPrimary,padding:"7px 16px",opacity:chatLoading?0.5:1,cursor:chatLoading?"not-allowed":"pointer"}}
+              onClick={sendChat}
+              disabled={chatLoading}
+            >
+              {chatLoading?"…":"送信"}
+            </button>
+          </div>
+
+          {/* 履歴保持の注記 */}
+          <div style={{fontSize:10,color:"#D1D5DB",marginTop:6,textAlign:"right"}}>
+            💾 チャット履歴はこのデバイスに保存されます
           </div>
         </div>
       )}
