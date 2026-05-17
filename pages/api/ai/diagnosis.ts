@@ -1,4 +1,4 @@
-// pages/api/ai/diagnosis.ts — AI健康診断（OpenRouter/free ルーター使用）
+// pages/api/ai/diagnosis.ts — AI健康診断（OpenRouter/free・診断/チャット切り替え）
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { withAuth } from '@/lib/withAuth'
 
@@ -10,27 +10,53 @@ export default withAuth(async (req: NextApiRequest, res: NextApiResponse) => {
     return res.status(500).json({ error: 'OPENROUTER_API_KEY が設定されていません。' })
   }
 
-  const { cattleData, weatherData, messages } = req.body
-
-  const systemPrompt = 'You are a Japanese livestock veterinarian AI assistant. Analyze the cattle data and weather information, and return ONLY a JSON object (no code blocks, no extra text) in this format: {"risk":"low|mid|high","riskLabel":"低リスク|要観察|要対応","summary":"日本語で2文の総評","actions":["対応1","対応2","対応3"],"detail":"日本語で詳細説明2〜3文","weatherImpact":"気象が健康に与える影響の一言コメント"}'
-
-  const diagnosisRequest =
-    `以下のデータを日本語で総合診断してください。\n` +
-    `個体: ${JSON.stringify(cattleData)}\n` +
-    `気象: ${JSON.stringify(weatherData)}`
-
-  const userContent = messages?.length > 0
-    ? String(messages[messages.length - 1].content)
-    : diagnosisRequest
-
-  const historyMessages = messages?.length > 1
-    ? messages.slice(0, -1).map((m: any) => ({
-        role:    m.role === 'assistant' ? 'assistant' : 'user',
-        content: String(m.content),
-      }))
-    : []
+  const { cattleData, weatherData, messages, mode } = req.body
+  // mode: "diagnosis"（初回診断・JSON返却）| "chat"（追加相談・自然文返却）
 
   const safeApiKey = apiKey.trim().replace(/[^\x20-\x7E]/g, '')
+
+  const isChatMode = mode === 'chat' || (messages && messages.length > 1)
+
+  // ── 初回診断モード：JSON形式で返す ──────────────────────────────
+  const diagnosisSystem =
+    'You are a Japanese livestock veterinarian AI assistant. ' +
+    'Analyze the cattle data and weather information carefully. ' +
+    'Return ONLY a valid JSON object with NO code blocks, NO markdown, NO extra text. ' +
+    'Format: {"risk":"low|mid|high","riskLabel":"低リスク|要観察|要対応","summary":"2文以内の総評（日本語）","actions":["具体的な対応1","具体的な対応2","具体的な対応3"],"detail":"詳細説明2〜3文（日本語）","weatherImpact":"気象が健康に与える影響（日本語1文）"}'
+
+  // ── チャットモード：自然な日本語で返す ─────────────────────────
+  const weatherInfo = weatherData
+    ? `【気象情報】気温${weatherData.current?.temp}℃、湿度${weatherData.current?.humidity}%、風速${weatherData.current?.wind}km/h`
+    : ''
+  const cattleInfo = cattleData
+    ? `【個体情報】${cattleData.farm_id || cattleData.farmId}、品種:${cattleData.breed}、ステータス:${cattleData.status}、備考:${cattleData.note || 'なし'}`
+    : ''
+
+  const chatSystem =
+    `あなたは日本の畜産専門の獣医師AIアシスタントです。` +
+    `以下の個体・気象情報を踏まえて、獣医師として丁寧に日本語で回答してください。` +
+    `回答は200文字以内の自然な日本語にしてください。JSONは使わないでください。\n` +
+    `${cattleInfo}\n${weatherInfo}`
+
+  const systemPrompt = isChatMode ? chatSystem : diagnosisSystem
+
+  const diagnosisContent =
+    `以下のデータを総合診断してください。\n` +
+    `個体データ: ${JSON.stringify(cattleData)}\n` +
+    `気象データ: ${JSON.stringify(weatherData)}`
+
+  // メッセージ構築
+  let chatMessages: any[]
+  if (isChatMode && messages?.length > 0) {
+    // チャット継続：履歴を引き継ぎ、最新ユーザーメッセージを追加
+    chatMessages = messages.map((m: any) => ({
+      role:    m.role === 'assistant' ? 'assistant' : 'user',
+      content: String(m.content),
+    }))
+  } else {
+    // 初回診断
+    chatMessages = [{ role: 'user', content: diagnosisContent }]
+  }
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -42,13 +68,12 @@ export default withAuth(async (req: NextApiRequest, res: NextApiResponse) => {
         'x-title':       'Farm Management System',
       }),
       body: JSON.stringify({
-        model:       'openrouter/free',  // 利用可能な無料モデルを自動選択
-        temperature: 0.3,
-        max_tokens:  1024,
+        model:       'openrouter/free',
+        temperature: isChatMode ? 0.5 : 0.2,
+        max_tokens:  isChatMode ? 512 : 1024,
         messages: [
           { role: 'system', content: systemPrompt },
-          ...historyMessages,
-          { role: 'user',   content: userContent },
+          ...chatMessages,
         ],
       }),
     })
@@ -62,7 +87,7 @@ export default withAuth(async (req: NextApiRequest, res: NextApiResponse) => {
     }
 
     const data = await response.json()
-    const text = data.choices?.[0]?.message?.content || ''
+    const text = (data.choices?.[0]?.message?.content || '').trim()
 
     res.status(200).json({ content: { type: 'text', text } })
 
