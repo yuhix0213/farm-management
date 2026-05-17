@@ -153,9 +153,17 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
     const newMsgs=[...messages,{role:"user",content:userMsg}]
     setMessages(newMsgs); setChatLoading(true)
     try {
-      const res = await fetch("/api/ai/diagnosis",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cattleData:cattle,weatherData:weather,messages:newMsgs})})
+      const res = await fetch("/api/ai/diagnosis",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({cattleData:cattle,weatherData:weather,messages:newMsgs,mode:"chat"})})
       const data = await res.json()
-      setMessages((m:any)=>[...m,{role:"assistant",content:data.content?.text||"回答を取得できませんでした。"}])
+      // JSONが混入していた場合はプレーンテキストとして表示
+      let replyText = data.content?.text || "回答を取得できませんでした。"
+      try {
+        const parsed = JSON.parse(replyText.replace(/```json|```/g,"").trim())
+        // チャットなのにJSONが返ってきた場合はsummaryを表示
+        if (parsed.summary) replyText = parsed.summary + (parsed.detail?" "+parsed.detail:"")
+      } catch { /* プレーンテキストならそのまま */ }
+      setMessages((m:any)=>[...m,{role:"assistant",content:replyText}])
     } catch {
       setMessages((m:any)=>[...m,{role:"assistant",content:"エラーが発生しました。"}])
     }
