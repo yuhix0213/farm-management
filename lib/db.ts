@@ -21,7 +21,7 @@ function getPool(): mysql.Pool {
   return pool
 }
 
-export default { query: (...args: any[]) => getPool().execute(...args) }
+export default getPool
 
 export async function query<T = any>(sql: string, params?: any[]): Promise<T[]> {
   const [rows] = await getPool().execute(sql, params)
