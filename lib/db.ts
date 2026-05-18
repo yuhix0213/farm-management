@@ -1,11 +1,11 @@
 // lib/db.ts — MySQL接続プール（全APIで共有・lazy初期化）
 import mysql from 'mysql2/promise'
 
-let pool: mysql.Pool | null = null
+let _pool: mysql.Pool | null = null
 
 function getPool(): mysql.Pool {
-  if (!pool) {
-    pool = mysql.createPool({
+  if (!_pool) {
+    _pool = mysql.createPool({
       host:               process.env.DB_HOST!,
       port:               Number(process.env.DB_PORT ?? 3306),
       user:               process.env.DB_USER!,
@@ -18,10 +18,17 @@ function getPool(): mysql.Pool {
       queueLimit:         0,
     })
   }
-  return pool
+  return _pool
 }
 
-export default getPool
+// pool.getConnection() / pool.execute() 等をそのまま使えるProxy
+const pool = new Proxy({} as mysql.Pool, {
+  get(_target, prop) {
+    return (getPool() as any)[prop]
+  }
+})
+
+export default pool
 
 export async function query<T = any>(sql: string, params?: any[]): Promise<T[]> {
   const [rows] = await getPool().execute(sql, params)
