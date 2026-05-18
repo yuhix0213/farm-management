@@ -11,48 +11,44 @@ export default withAuth(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   const { cattleData, weatherData, messages, mode } = req.body
-  // mode: "diagnosis"（初回診断・JSON返却）| "chat"（追加相談・自然文返却）
 
   const safeApiKey = apiKey.trim().replace(/[^\x20-\x7E]/g, '')
-
   const isChatMode = mode === 'chat' || (messages && messages.length > 1)
 
-  // ── 共通：日本語強制指示 ────────────────────────────────────────
-  const JAPANESE_RULE =
-    '重要: 必ず日本語のみで回答してください。英語・中国語など他言語は絶対に使用しないでください。' +
-    'IMPORTANT: Respond ONLY in Japanese. Do NOT use English or any other language under any circumstances.'
-
-  // ── 初回診断モード：JSON形式で返す ──────────────────────────────
-  const diagnosisSystem =
-    JAPANESE_RULE + '\n' +
-    'あなたは日本の畜産専門の獣医師AIアシスタントです。' +
-    '個体データと気象情報を分析し、以下のJSON形式のみで回答してください。' +
-    'コードブロック・マークダウン・余分なテキストは一切含めないでください。' +
-    'JSON形式: {"risk":"low|mid|high","riskLabel":"低リスク|要観察|要対応","summary":"2文以内の総評（日本語）","actions":["具体的な対応1","具体的な対応2","具体的な対応3"],"detail":"詳細説明2〜3文（日本語）","weatherImpact":"気象が健康に与える影響（日本語1文）"}'
-
-  // ── チャットモード：自然な日本語で返す ─────────────────────────
-  const weatherInfo = weatherData
-    ? `【気象情報】気温${weatherData.current?.temp}℃、湿度${weatherData.current?.humidity}%、風速${weatherData.current?.wind}km/h`
-    : ''
+  // ── 個体・気象情報を文字列化（両モードで共通使用）────────────────
   const cattleInfo = cattleData
-    ? `【個体情報】${cattleData.farm_id || cattleData.farmId}、品種:${cattleData.breed}、ステータス:${cattleData.status}、備考:${cattleData.note || 'なし'}`
+    ? `対象個体: 耳標${cattleData.ear_tag_no || cattleData.earTagNo}、管理番号${cattleData.farm_id || cattleData.farmId}、品種:${cattleData.breed}、性別:${cattleData.sex}、ステータス:${cattleData.status}、備考:${cattleData.note || 'なし'}`
+    : ''
+  const weatherInfo = weatherData
+    ? `気象: 気温${weatherData.current?.temp}℃、湿度${weatherData.current?.humidity}%、風速${weatherData.current?.wind}km/h`
     : ''
 
+  // ── 共通ルール ──────────────────────────────────────────────────
+  const BASE_RULE =
+    '必ず日本語のみで回答してください。英語・その他言語は使用禁止。' +
+    'RESPOND IN JAPANESE ONLY. ' +
+    'あなたは日本の牧場専門の獣医師AIです。牛・畜産に関する質問のみ回答してください。' +
+    '農業一般・作物・野菜・果物・穀物などの話題は対象外です。牛に無関係な質問には「畜産・牛に関するご質問にお答えしています」と日本語で断ってください。'
+
+  // ── 初回診断モード ───────────────────────────────────────────────
+  const diagnosisSystem =
+    BASE_RULE + '\n' +
+    '以下の個体データと気象情報を分析し、JSONのみで回答してください。コードブロック・マークダウン不要。\n' +
+    `${cattleInfo}\n${weatherInfo}\n` +
+    'JSON形式: {"risk":"low|mid|high","riskLabel":"低リスク|要観察|要対応","summary":"この個体の現状総評2文","actions":["この個体への具体的対応1","対応2","対応3"],"detail":"詳細説明2〜3文","weatherImpact":"現在の気象がこの個体に与える影響1文"}'
+
+  // ── チャットモード ───────────────────────────────────────────────
   const chatSystem =
-    JAPANESE_RULE + '\n' +
-    'あなたは日本の畜産専門の獣医師AIアシスタントです。' +
-    '以下の個体・気象情報を踏まえて、獣医師として丁寧に日本語のみで回答してください。' +
-    '回答は200文字以内の自然な日本語にしてください。JSONは使わないでください。\n' +
+    BASE_RULE + '\n' +
+    '以下の個体情報を前提に、獣医師として簡潔に日本語で回答してください。200文字以内。マークダウン記法（**や##）は使わないでください。\n' +
     `${cattleInfo}\n${weatherInfo}`
 
   const systemPrompt = isChatMode ? chatSystem : diagnosisSystem
 
   const diagnosisContent =
-    '以下のデータを日本語で総合診断してください。\n' +
-    `個体データ: ${JSON.stringify(cattleData)}\n` +
-    `気象データ: ${JSON.stringify(weatherData)}`
+    `次の牛の個体データと気象情報を日本語で総合診断してください。\n${cattleInfo}\n${weatherInfo}`
 
-  // メッセージ構築
+  // ── メッセージ構築 ───────────────────────────────────────────────
   let chatMessages: any[]
   if (isChatMode && messages?.length > 0) {
     chatMessages = messages.map((m: any) => ({
@@ -74,8 +70,8 @@ export default withAuth(async (req: NextApiRequest, res: NextApiResponse) => {
       }),
       body: JSON.stringify({
         model:       'openrouter/free',
-        temperature: isChatMode ? 0.5 : 0.2,
-        max_tokens:  isChatMode ? 512 : 1024,
+        temperature: isChatMode ? 0.4 : 0.2,
+        max_tokens:  isChatMode ? 400 : 1024,
         messages: [
           { role: 'system', content: systemPrompt },
           ...chatMessages,
