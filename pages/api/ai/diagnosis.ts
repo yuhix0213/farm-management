@@ -17,12 +17,18 @@ export default withAuth(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const isChatMode = mode === 'chat' || (messages && messages.length > 1)
 
+  // ── 共通：日本語強制指示 ────────────────────────────────────────
+  const JAPANESE_RULE =
+    '重要: 必ず日本語のみで回答してください。英語・中国語など他言語は絶対に使用しないでください。' +
+    'IMPORTANT: Respond ONLY in Japanese. Do NOT use English or any other language under any circumstances.'
+
   // ── 初回診断モード：JSON形式で返す ──────────────────────────────
   const diagnosisSystem =
-    'You are a Japanese livestock veterinarian AI assistant. ' +
-    'Analyze the cattle data and weather information carefully. ' +
-    'Return ONLY a valid JSON object with NO code blocks, NO markdown, NO extra text. ' +
-    'Format: {"risk":"low|mid|high","riskLabel":"低リスク|要観察|要対応","summary":"2文以内の総評（日本語）","actions":["具体的な対応1","具体的な対応2","具体的な対応3"],"detail":"詳細説明2〜3文（日本語）","weatherImpact":"気象が健康に与える影響（日本語1文）"}'
+    JAPANESE_RULE + '\n' +
+    'あなたは日本の畜産専門の獣医師AIアシスタントです。' +
+    '個体データと気象情報を分析し、以下のJSON形式のみで回答してください。' +
+    'コードブロック・マークダウン・余分なテキストは一切含めないでください。' +
+    'JSON形式: {"risk":"low|mid|high","riskLabel":"低リスク|要観察|要対応","summary":"2文以内の総評（日本語）","actions":["具体的な対応1","具体的な対応2","具体的な対応3"],"detail":"詳細説明2〜3文（日本語）","weatherImpact":"気象が健康に与える影響（日本語1文）"}'
 
   // ── チャットモード：自然な日本語で返す ─────────────────────────
   const weatherInfo = weatherData
@@ -33,15 +39,16 @@ export default withAuth(async (req: NextApiRequest, res: NextApiResponse) => {
     : ''
 
   const chatSystem =
-    `あなたは日本の畜産専門の獣医師AIアシスタントです。` +
-    `以下の個体・気象情報を踏まえて、獣医師として丁寧に日本語で回答してください。` +
-    `回答は200文字以内の自然な日本語にしてください。JSONは使わないでください。\n` +
+    JAPANESE_RULE + '\n' +
+    'あなたは日本の畜産専門の獣医師AIアシスタントです。' +
+    '以下の個体・気象情報を踏まえて、獣医師として丁寧に日本語のみで回答してください。' +
+    '回答は200文字以内の自然な日本語にしてください。JSONは使わないでください。\n' +
     `${cattleInfo}\n${weatherInfo}`
 
   const systemPrompt = isChatMode ? chatSystem : diagnosisSystem
 
   const diagnosisContent =
-    `以下のデータを総合診断してください。\n` +
+    '以下のデータを日本語で総合診断してください。\n' +
     `個体データ: ${JSON.stringify(cattleData)}\n` +
     `気象データ: ${JSON.stringify(weatherData)}`
 
