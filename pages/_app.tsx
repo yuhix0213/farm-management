@@ -10,6 +10,7 @@ const NAV = [
   { key:'/cattle',      label:'個体一覧' },
   { key:'/breeding',    label:'繁殖・分娩管理' },
   { key:'/calf-sales',  label:'子牛販売市場' },
+  { key:'/masters',     label:'マスタ管理' },
 ]
 
 export default function App({ Component, pageProps }: AppProps) {
