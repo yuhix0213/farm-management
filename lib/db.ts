@@ -21,7 +21,7 @@ function getPool(): mysql.Pool {
   return _pool
 }
 
-// pool.getConnection() / pool.execute() 等をそのまま使えるProxy
+// pool.getConnection() 等をそのまま使えるProxy
 const pool = new Proxy({} as mysql.Pool, {
   get(_target, prop) {
     return (getPool() as any)[prop]
@@ -30,9 +30,16 @@ const pool = new Proxy({} as mysql.Pool, {
 
 export default pool
 
+// SELECT / UPDATE / DELETE 用（行配列を返す）
 export async function query<T = any>(sql: string, params?: any[]): Promise<T[]> {
   const [rows] = await getPool().execute(sql, params)
   return rows as T[]
+}
+
+// INSERT 用（insertId を返す）
+export async function insert(sql: string, params?: any[]): Promise<number> {
+  const [result] = await getPool().execute(sql, params)
+  return (result as mysql.ResultSetHeader).insertId
 }
 
 export async function queryOne<T = any>(sql: string, params?: any[]): Promise<T | null> {
