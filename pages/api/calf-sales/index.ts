@@ -1,7 +1,7 @@
 // pages/api/calf-sales/index.ts — 子牛販売台帳(GET/POST/PUT)
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { withAuth } from '@/lib/withAuth'
-import { query } from '@/lib/db'
+import { query, insert } from '@/lib/db'
 
 export default withAuth(async (req, res) => {
   try {
@@ -10,41 +10,24 @@ export default withAuth(async (req, res) => {
       const sql = month
         ? "SELECT * FROM calf_sales WHERE sale_date LIKE ? ORDER BY sale_date DESC"
         : "SELECT * FROM calf_sales ORDER BY created_at DESC"
-      const rows = await query(sql, month ? [`${month}%`] : [])
-      return res.status(200).json(rows)
+      return res.status(200).json(await query(sql, month ? [`${month}%`] : []))
     }
-
     if (req.method === 'POST') {
-      const {
-        ear_tag_no, mother_ear_tag, breed, sex,
-        date_of_birth, age_days, weight_kg,
-        market, sale_date, price, buyer, status,
-      } = req.body
+      const { ear_tag_no, mother_ear_tag, breed, sex,
+              date_of_birth, age_days, weight_kg,
+              market, sale_date, price, buyer, status } = req.body
       if (!ear_tag_no?.trim()) return res.status(400).json({ error: '子牛耳標番号は必須です' })
-      const [r]: any = await query(
+      const id = await insert(
         `INSERT INTO calf_sales
            (ear_tag_no, mother_ear_tag, breed, sex, date_of_birth, age_days,
             weight_kg, market, sale_date, price, buyer, status)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [
-          ear_tag_no.trim(),
-          mother_ear_tag || null,
-          breed || null,
-          sex || null,
-          date_of_birth || null,
-          age_days || null,
-          weight_kg || null,
-          market || null,
-          sale_date || null,
-          price || null,
-          buyer || null,
-          status || '登録済',
-        ]
-      )
-      const row = await query('SELECT * FROM calf_sales WHERE id=?', [r.insertId])
+        [ear_tag_no.trim(), mother_ear_tag||null, breed||null, sex||null,
+         date_of_birth||null, age_days||null, weight_kg||null,
+         market||null, sale_date||null, price||null, buyer||null, status||'登録済'])
+      const row = await query('SELECT * FROM calf_sales WHERE id=?', [id])
       return res.status(201).json(row[0])
     }
-
     if (req.method === 'PUT') {
       const { id, market, sale_date, price, buyer, status } = req.body
       const ageDays = req.body.date_of_birth
@@ -52,12 +35,10 @@ export default withAuth(async (req, res) => {
         : null
       await query(
         `UPDATE calf_sales SET market=?,sale_date=?,price=?,buyer=?,status=?,age_days=COALESCE(?,age_days) WHERE id=?`,
-        [market||null, sale_date||null, price||null, buyer||null, status, ageDays, id]
-      )
+        [market||null, sale_date||null, price||null, buyer||null, status, ageDays, id])
       const row = await query('SELECT * FROM calf_sales WHERE id=?', [id])
       return res.status(200).json(row[0])
     }
-
     res.status(405).end()
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
