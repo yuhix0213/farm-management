@@ -174,7 +174,7 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
       setAiResult(parsed)
       setMessages([{role:"assistant",content:text}])
     } catch(e) {
-      setAiResult({risk:"low",riskLabel:"エラー",summary:"診断の取得に失敗しました。再試行してください。",actions:[],detail:"",weatherImpact:""})
+      setAiResult({risk:"error",riskLabel:"エラー",summary:"診断の取得に失敗しました。再試行してください。",actions:[],detail:"",weatherImpact:""})
     }
     setLoading(false)
   }
@@ -525,11 +525,13 @@ export default function CattlePage() {
 
   const addCattle = async (form:any) => {
     const res = await fetch('/api/cattle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)})
-    if(res.ok){ setModal("none"); load() } else alert('登録に失敗しました')
+    if(res.ok){ setModal("none"); load() } else { const d=await res.json().catch(()=>({})); alert('登録に失敗しました
+' + (d.error||res.status)) }
   }
   const editCattle = async (form:any) => {
     const res = await fetch(`/api/cattle/${selected.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)})
-    if(res.ok){ const d=await res.json(); setSelected(d); setCattle((cs:any)=>cs.map((c:any)=>c.id===d.id?d:c)); setModal("none") } else alert('更新に失敗しました')
+    if(res.ok){ const d=await res.json(); setSelected(d); setCattle((cs:any)=>cs.map((c:any)=>c.id===d.id?d:c)); setModal("none") } else { const d=await res.json().catch(()=>({})); alert('更新に失敗しました
+' + (d.error||res.status)) }
   }
   const deleteCattle = async (id:number) => {
     if(!window.confirm("この個体を削除しますか？")) return
