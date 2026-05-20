@@ -1,7 +1,7 @@
 // pages/api/cattle/index.ts — 個体一覧(GET) / 登録(POST)
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { withAuth } from '@/lib/withAuth'
-import { query } from '@/lib/db'
+import { query, insert } from '@/lib/db'
 
 export default withAuth(async (req, res) => {
   try {
@@ -18,14 +18,14 @@ export default withAuth(async (req, res) => {
       const { ear_tag_no,farm_id,breed,sex,cattle_type,date_of_birth,
               intro_date,intro_weight_kg,intro_price,origin,
               barn_id,stall_no,status,staff_id,note } = req.body
-      const [r]: any = await query(
+      const id = await insert(
         `INSERT INTO cattle (ear_tag_no,farm_id,breed,sex,cattle_type,date_of_birth,
            intro_date,intro_weight_kg,intro_price,origin,barn_id,stall_no,status,staff_id,note)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [ear_tag_no,farm_id||null,breed,sex,cattle_type,date_of_birth,
          intro_date||null,intro_weight_kg||null,intro_price||null,origin||null,
          barn_id||null,stall_no||null,status||'育成中',staff_id||null,note||null])
-      const row = await query('SELECT * FROM cattle WHERE id=?', [r.insertId])
+      const row = await query('SELECT * FROM cattle WHERE id=?', [id])
       return res.status(201).json(row[0])
     }
     res.status(405).end()
