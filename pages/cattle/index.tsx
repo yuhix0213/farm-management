@@ -525,13 +525,11 @@ export default function CattlePage() {
 
   const addCattle = async (form:any) => {
     const res = await fetch('/api/cattle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)})
-    if(res.ok){ setModal("none"); load() } else { const d=await res.json().catch(()=>({})); alert('登録に失敗しました
-' + (d.error||res.status)) }
+    if(res.ok){ setModal("none"); load() } else { const d=await res.json().catch(()=>({})); alert('登録に失敗しました: ' + (d.error||res.status)) }
   }
   const editCattle = async (form:any) => {
     const res = await fetch(`/api/cattle/${selected.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)})
-    if(res.ok){ const d=await res.json(); setSelected(d); setCattle((cs:any)=>cs.map((c:any)=>c.id===d.id?d:c)); setModal("none") } else { const d=await res.json().catch(()=>({})); alert('更新に失敗しました
-' + (d.error||res.status)) }
+    if(res.ok){ const d=await res.json(); setSelected(d); setCattle((cs:any)=>cs.map((c:any)=>c.id===d.id?d:c)); setModal("none") } else { const d=await res.json().catch(()=>({})); alert('更新に失敗しました: ' + (d.error||res.status)) }
   }
   const deleteCattle = async (id:number) => {
     if(!window.confirm("この個体を削除しますか？")) return
