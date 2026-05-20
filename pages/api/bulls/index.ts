@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { withAuth } from '@/lib/withAuth'
-import { query } from '@/lib/db'
+import { query, insert } from '@/lib/db'
 
 export default withAuth(async (req, res) => {
   try {
@@ -11,11 +11,11 @@ export default withAuth(async (req, res) => {
     if (req.method === 'POST') {
       const { name, reg_no, breed, type, owner, bms, note } = req.body
       if (!name?.trim()) return res.status(400).json({ error: '名号は必須です' })
-      const [r]: any = await query(
+      const id = await insert(
         'INSERT INTO bulls (name, reg_no, breed, type, owner, bms, note) VALUES (?,?,?,?,?,?,?)',
         [name.trim(), reg_no||null, breed||null, type||'精液', owner||null, bms||null, note||null]
       )
-      const row = await query('SELECT * FROM bulls WHERE id=?', [r.insertId])
+      const row = await query('SELECT * FROM bulls WHERE id=?', [id])
       return res.status(201).json(row[0])
     }
     res.status(405).end()
