@@ -1,7 +1,7 @@
 // pages/api/breeding/cows.ts — 母牛台帳(GET/POST/PUT)
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { withAuth } from '@/lib/withAuth'
-import { query } from '@/lib/db'
+import { query, insert } from '@/lib/db'
 
 export default withAuth(async (req, res) => {
   try {
@@ -16,14 +16,14 @@ export default withAuth(async (req, res) => {
     if (req.method === 'POST') {
       const { ear_tag_no,farm_id,breed,date_of_birth,status,parity,
               bull_id,last_insem_date,expected_birth,barn_id,stall_no,note } = req.body
-      const [r]: any = await query(
+      const id = await insert(
         `INSERT INTO cows (ear_tag_no,farm_id,breed,date_of_birth,status,parity,
            bull_id,last_insem_date,expected_birth,barn_id,stall_no,note)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         [ear_tag_no,farm_id||null,breed||null,date_of_birth||null,
          status||'空胎中',parity||0,bull_id||null,
          last_insem_date||null,expected_birth||null,barn_id||null,stall_no||null,note||null])
-      const row = await query('SELECT * FROM cows WHERE id=?', [r.insertId])
+      const row = await query('SELECT * FROM cows WHERE id=?', [id])
       return res.status(201).json(row[0])
     }
     if (req.method === 'PUT') {
