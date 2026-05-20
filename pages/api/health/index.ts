@@ -1,7 +1,7 @@
 // pages/api/health/index.ts — 健康記録(GET/POST)
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { withAuth } from '@/lib/withAuth'
-import { query } from '@/lib/db'
+import { query, insert } from '@/lib/db'
 
 export default withAuth(async (req, res) => {
   const cattle_id = req.query.cattle_id ? Number(req.query.cattle_id) : null
@@ -15,13 +15,13 @@ export default withAuth(async (req, res) => {
     if (req.method === 'POST') {
       const { cattle_id: cid, record_date, record_type, temperature,
               diagnosis, treatment, medicine, cost, vet_name, next_checkup } = req.body
-      const [r]: any = await query(
+      const id = await insert(
         `INSERT INTO health_records
            (cattle_id,record_date,record_type,temperature,diagnosis,treatment,medicine,cost,vet_name,next_checkup)
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [cid,record_date,record_type,temperature||null,diagnosis||null,
          treatment||null,medicine||null,cost||null,vet_name||null,next_checkup||null])
-      const row = await query('SELECT * FROM health_records WHERE id=?', [r.insertId])
+      const row = await query('SELECT * FROM health_records WHERE id=?', [id])
       return res.status(201).json(row[0])
     }
     res.status(405).end()
