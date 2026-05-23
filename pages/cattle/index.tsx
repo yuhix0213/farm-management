@@ -384,7 +384,7 @@ function CattleDetail({cattle,weights,healthRecords,barns,staff,onAddWeight,onAd
   const hs = [...healthRecords].filter((h:any)=>h.cattle_id===cattle.id).sort((a:any,b:any)=>b.record_date.localeCompare(a.record_date))
   const lw = ws[0]
   const isFemale  = cattle.sex==='雌'
-  const TABS:[string,string][] = [["info","基本情報"],["weight","体重履歴"],["health","健康記録"],...(isFemale?[["breeding","🐄 繁殖"]]:[] as [string,string][]),["ai","🩺 AI診断"]]
+  const TABS:[string,string][] = [["info","基本情報"],["weight","体重履歴"],["health","健康記録"],...(isFemale?[["breeding","🐄 繁殖"] as [string,string]]:[] as [string,string][]),["ai","🩺 AI診断"]]
   const staffName = staff.find((s:any)=>s.id===cattle.staff_id)?.name||"—"
   const barnName  = barns.find((b:any)=>b.id===cattle.barn_id)?.name||"—"
 
