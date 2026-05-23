@@ -162,17 +162,30 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
   const lastHealth = [...healthRecords].filter((h:any)=>h.cattle_id===cattle.id).sort((a:any,b:any)=>b.record_date.localeCompare(a.record_date))[0]
   const weather = WEATHER
 
+  const extractJson = (text:string) => {
+    try { return JSON.parse(text.replace(/```json|```/g,"").trim()) } catch {}
+    const m = text.match(/\{[\s\S]*\}/)
+    if(m) { try { return JSON.parse(m[0]) } catch {} }
+    return null
+  }
+
   const runDiagnosis = async () => {
     setLoading(true); setAiResult(null); setMessages([])
     try {
       localStorage.removeItem(storageKey)
       localStorage.removeItem(storageResultKey)
       const res = await fetch("/api/ai/diagnosis",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cattleData:cattle,weatherData:weather})})
+      if(!res.ok) throw new Error("HTTP "+res.status)
       const data = await res.json()
       const text = data.content?.text||""
-      const parsed = JSON.parse(text.replace(/```json|```/g,"").trim())
-      setAiResult(parsed)
-      setMessages([{role:"assistant",content:text}])
+      const parsed = extractJson(text)
+      if(parsed && parsed.risk) {
+        setAiResult(parsed)
+        setMessages([{role:"assistant",content:text}])
+      } else {
+        setAiResult({risk:"low",riskLabel:"診断完了",summary:text.slice(0,200)||"診断結果を取得しました。",actions:[],detail:text,weatherImpact:""})
+        setMessages([{role:"assistant",content:text}])
+      }
     } catch(e) {
       setAiResult({risk:"error",riskLabel:"エラー",summary:"診断の取得に失敗しました。再試行してください。",actions:[],detail:"",weatherImpact:""})
     }
