@@ -1,4 +1,4 @@
-// pages/breeding/index.tsx — 繁殖・分娩管理（登録フォーム付き・レスポンシブ）
+// pages/breeding/index.tsx — 繁殖・分娩管理（授精日入力・分娩予定カウントダウン・編集対応）
 import { useEffect, useState } from 'react'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
@@ -9,16 +9,120 @@ const S = {
   select: { width:'100%', padding:'8px 10px', border:'1px solid #C8D0DC', borderRadius:8, fontSize:13, boxSizing:'border-box' as const, background:'#fff' },
 }
 
-const cowStatusColor: Record<string,[string,string]> = {
-  '妊娠中':['#1D9E75','#E1F5EE'],'授精待ち':['#BA7517','#FAEEDA'],
-  '空胎中':['#E24B4A','#FCEBEB'],'分娩後':['#378ADD','#E6F1FB'],
+const GESTATION = 285 // 受胎期間（日）
+
+// 授精日 → 分娩予定日
+const calcExpectedBirth = (insemDate: string): string => {
+  if (!insemDate) return ''
+  const d = new Date(insemDate)
+  d.setDate(d.getDate() + GESTATION)
+  return d.toISOString().slice(0, 10)
 }
 
-const blankCow = { ear_tag_no:'', farm_id:'', breed:'ホルスタイン', date_of_birth:'',
-  status:'空胎中', parity:0, bull_id:'', last_insem_date:'', expected_birth:'', barn_id:'', note:'' }
-const blankBull = { name:'', reg_no:'', breed:'黒毛和種', type:'精液', owner:'', bms:'', note:'' }
-const blankBirth = { cowId:'', bullId:'', insemDate:'', birthDate:new Date().toISOString().slice(0,10),
-  calfEarTag:'', calfSex:'雄', calfWeightKg:'', dystocia:false, staffId:'1', note:'', breed:'' }
+// 分娩予定日 → カウントダウン情報
+const calcCountdown = (expectedBirth: string) => {
+  if (!expectedBirth) return null
+  const today = new Date(); today.setHours(0,0,0,0)
+  const exp   = new Date(expectedBirth); exp.setHours(0,0,0,0)
+  const diff  = Math.round((exp.getTime() - today.getTime()) / 86400000)
+  return diff
+}
+
+const cowStatusColor: Record<string,[string,string]> = {
+  '妊娠中':  ['#1D9E75','#E1F5EE'],
+  '授精待ち':['#BA7517','#FAEEDA'],
+  '空胎中':  ['#E24B4A','#FCEBEB'],
+  '分娩後':  ['#378ADD','#E6F1FB'],
+}
+
+const blankCow = {
+  ear_tag_no:'', farm_id:'', breed:'ホルスタイン', date_of_birth:'',
+  status:'空胎中', parity:0, bull_id:'', last_insem_date:'', expected_birth:'', barn_id:'', note:''
+}
+const blankBull  = { name:'', reg_no:'', breed:'黒毛和種', type:'精液', owner:'', bms:'', note:'' }
+const blankBirth = {
+  cowId:'', bullId:'', insemDate:'', birthDate: new Date().toISOString().slice(0,10),
+  calfEarTag:'', calfSex:'雄', calfWeightKg:'', dystocia:false, staffId:'', note:'', breed:''
+}
+
+// ── 授精記録モーダル ──────────────────────────────────────────────
+function InsemModal({ cow, bulls, onClose, onSave }: { cow:any, bulls:any[], onClose:()=>void, onSave:(data:any)=>void }) {
+  const [insemDate, setInsemDate] = useState(cow.last_insem_date || '')
+  const [bullId,    setBullId]    = useState(String(cow.bull_id || ''))
+  const [note,      setNote]      = useState('')
+  const expectedBirth = calcExpectedBirth(insemDate)
+  const countdown     = calcCountdown(expectedBirth)
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={onClose}>
+      <div style={{background:'#fff',borderRadius:14,padding:'24px 28px',width:'100%',maxWidth:460,boxShadow:'0 8px 32px rgba(0,0,0,0.15)'}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+          <span style={{fontSize:15,fontWeight:600,color:'#1D3557'}}>🐄 授精記録 — {cow.farm_id||cow.ear_tag_no}</span>
+          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#9CA3AF'}}>✕</button>
+        </div>
+
+        <label style={S.label}>最終授精日 *</label>
+        <input type="date" style={S.input} value={insemDate} onChange={e => setInsemDate(e.target.value)} />
+
+        {/* 分娩予定日の自動計算・表示 */}
+        {insemDate && (
+          <div style={{margin:'12px 0',background:'#F0F9FF',border:'1px solid #BAE6FD',borderRadius:10,padding:'12px 16px'}}>
+            <div style={{fontSize:11,color:'#0369A1',marginBottom:6,fontWeight:500}}>📅 自動計算（受胎期間 {GESTATION}日）</div>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div>
+                <div style={{fontSize:11,color:'#6B7280'}}>分娩予定日</div>
+                <div style={{fontSize:17,fontWeight:700,color:'#1D3557'}}>{expectedBirth}</div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontSize:11,color:'#6B7280'}}>カウントダウン</div>
+                <div style={{
+                  fontSize:17, fontWeight:700,
+                  color: countdown === null ? '#888' : countdown < 0 ? '#E24B4A' : countdown <= 14 ? '#BA7517' : '#1D9E75'
+                }}>
+                  {countdown === null ? '—' : countdown < 0 ? `${Math.abs(countdown)}日超過` : countdown === 0 ? '本日！' : `あと ${countdown}日`}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <label style={{...S.label, marginTop:12}}>使用種牛</label>
+        <select style={S.select} value={bullId} onChange={e => setBullId(e.target.value)}>
+          <option value="">未選択</option>
+          {bulls.map((b:any) => <option key={b.id} value={b.id}>{b.name}（{b.breed}）</option>)}
+        </select>
+
+        <label style={{...S.label, marginTop:12}}>メモ</label>
+        <input style={S.input} value={note} onChange={e => setNote(e.target.value)} placeholder="例: 1回目授精、受精卵移植など" />
+
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20}}>
+          <button onClick={onClose} style={{padding:'8px 18px',borderRadius:8,border:'1px solid #C8D0DC',background:'#fff',cursor:'pointer',fontSize:13}}>キャンセル</button>
+          <button onClick={() => onSave({ insemDate, bullId, expectedBirth, note })} disabled={!insemDate}
+            style={{padding:'8px 22px',borderRadius:8,background:insemDate?'#1D9E75':'#A8D5C2',color:'#fff',border:'none',cursor:insemDate?'pointer':'not-allowed',fontSize:13,fontWeight:600}}>
+            記録して保存
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── カウントダウンバッジ ─────────────────────────────────────────
+function CountdownBadge({ expectedBirth }: { expectedBirth: string }) {
+  const days = calcCountdown(expectedBirth)
+  if (days === null) return <span style={{color:'#9CA3AF'}}>—</span>
+  const [color, bg, text] =
+    days < 0    ? ['#E24B4A','#FCEBEB', `${Math.abs(days)}日超過`] :
+    days === 0  ? ['#E24B4A','#FCEBEB', '本日！'] :
+    days <= 7   ? ['#E24B4A','#FCEBEB', `あと${days}日 🚨`] :
+    days <= 21  ? ['#BA7517','#FAEEDA', `あと${days}日 ⚠️`] :
+                  ['#1D9E75','#E1F5EE', `あと${days}日`]
+  return (
+    <span style={{fontSize:11,padding:'3px 8px',borderRadius:99,background:bg,color,fontWeight:500,whiteSpace:'nowrap'}}>
+      {text}
+    </span>
+  )
+}
 
 export default function BreedingPage() {
   const router = useRouter()
@@ -31,9 +135,13 @@ export default function BreedingPage() {
   const [showForm,setShowForm]= useState(false)
   const [saving,  setSaving]  = useState(false)
   const [msg,     setMsg]     = useState('')
-  const [cowForm, setCowForm] = useState<any>(blankCow)
-  const [bullForm,setBullForm]= useState<any>(blankBull)
-  const [birthForm,setBirthForm]= useState<any>(blankBirth)
+
+  // 授精モーダル
+  const [insemTarget, setInsemTarget] = useState<any>(null)
+
+  const [cowForm,   setCowForm]   = useState<any>(blankCow)
+  const [bullForm,  setBullForm]  = useState<any>(blankBull)
+  const [birthForm, setBirthForm] = useState<any>(blankBirth)
 
   const load = () => {
     setLoading(true)
@@ -52,20 +160,57 @@ export default function BreedingPage() {
   }
   useEffect(()=>{ load() },[])
 
-  const setCow  = (k:string,v:any)=>setCowForm((f:any)=>({...f,[k]:v}))
-  const setBull = (k:string,v:any)=>setBullForm((f:any)=>({...f,[k]:v}))
-  const setBirth= (k:string,v:any)=>setBirthForm((f:any)=>({...f,[k]:v}))
+  const setCow   = (k:string,v:any) => setCowForm  ((f:any)=>({...f,[k]:v}))
+  const setBull  = (k:string,v:any) => setBullForm ((f:any)=>({...f,[k]:v}))
+  const setBirth = (k:string,v:any) => setBirthForm((f:any)=>({...f,[k]:v}))
+
+  // 最終授精日が変わったら分娩予定日を自動更新（母牛登録フォーム内）
+  const handleInsemDateChange = (date: string) => {
+    setCow('last_insem_date', date)
+    const exp = calcExpectedBirth(date)
+    setCow('expected_birth', exp)
+    if (exp) setCow('status', '妊娠中')
+  }
+
+  // 授精記録保存（既存母牛の授精日更新）
+  const handleInsemSave = async (data: any) => {
+    const { insemDate, bullId, expectedBirth } = data
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/breeding/cows`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id:               insemTarget.id,
+          ear_tag_no:       insemTarget.ear_tag_no,
+          farm_id:          insemTarget.farm_id,
+          breed:            insemTarget.breed,
+          date_of_birth:    insemTarget.date_of_birth,
+          status:           '妊娠中',
+          parity:           insemTarget.parity,
+          bull_id:          bullId || null,
+          last_insem_date:  insemDate,
+          expected_birth:   expectedBirth,
+          barn_id:          insemTarget.barn_id,
+          stall_no:         insemTarget.stall_no,
+          note:             insemTarget.note,
+        }),
+      })
+      if (res.ok) { setInsemTarget(null); load() }
+      else { const d = await res.json(); alert(d.error || '保存失敗') }
+    } catch { alert('通信エラー') } finally { setSaving(false) }
+  }
 
   const handleCowSave = async () => {
     if (!cowForm.ear_tag_no) { setMsg('耳標番号は必須です'); return }
     setSaving(true); setMsg('')
     try {
-      const res = await fetch('/api/breeding/cows',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({...cowForm, bull_id:cowForm.bull_id||null, parity:Number(cowForm.parity)||0 }),
+      const res = await fetch('/api/breeding/cows', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cowForm, bull_id: cowForm.bull_id||null, parity: Number(cowForm.parity)||0 }),
       })
       if (res.ok) { setShowForm(false); setCowForm(blankCow); load() }
-      else { const d=await res.json(); setMsg(d.error||'登録に失敗しました') }
+      else { const d = await res.json(); setMsg(d.error||'登録に失敗しました') }
     } catch { setMsg('通信エラー') } finally { setSaving(false) }
   }
 
@@ -73,12 +218,12 @@ export default function BreedingPage() {
     if (!bullForm.name) { setMsg('名号は必須です'); return }
     setSaving(true); setMsg('')
     try {
-      const res = await fetch('/api/breeding/bulls',{
-        method:'POST', headers:{'Content-Type':'application/json'},
+      const res = await fetch('/api/breeding/bulls', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bullForm),
       })
       if (res.ok) { setShowForm(false); setBullForm(blankBull); load() }
-      else { const d=await res.json(); setMsg(d.error||'登録に失敗しました') }
+      else { const d = await res.json(); setMsg(d.error||'登録に失敗しました') }
     } catch { setMsg('通信エラー') } finally { setSaving(false) }
   }
 
@@ -87,22 +232,28 @@ export default function BreedingPage() {
       setMsg('母牛・子牛耳標・分娩日は必須です'); return
     }
     setSaving(true); setMsg('')
-    const cow   = cows.find((c:any)=>String(c.id)===String(birthForm.cowId))
-    const bull  = bulls.find((b:any)=>String(b.id)===String(birthForm.bullId))
+    const cow  = cows.find((c:any) => String(c.id)===String(birthForm.cowId))
+    const bull = bulls.find((b:any) => String(b.id)===String(birthForm.bullId))
     const breed = cow&&bull ? (cow.breed===bull.breed?cow.breed:cow.breed+'×'+bull.breed) : cow?.breed||''
     try {
-      const res = await fetch('/api/breeding/birth',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({...birthForm, breed,
-          cowId:Number(birthForm.cowId), bullId:birthForm.bullId?Number(birthForm.bullId):null,
-          calfWeightKg:birthForm.calfWeightKg?Number(birthForm.calfWeightKg):null,
-          staffId:birthForm.staffId?Number(birthForm.staffId):null,
+      const res = await fetch('/api/breeding/birth', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...birthForm, breed,
+          cowId:       Number(birthForm.cowId),
+          bullId:      birthForm.bullId ? Number(birthForm.bullId) : null,
+          calfWeightKg:birthForm.calfWeightKg ? Number(birthForm.calfWeightKg) : null,
+          staffId:     birthForm.staffId ? Number(birthForm.staffId) : null,
         }),
       })
       if (res.ok) { setShowForm(false); setBirthForm(blankBirth); load() }
-      else { const d=await res.json(); setMsg(d.error||'登録に失敗しました') }
+      else { const d = await res.json(); setMsg(d.error||'登録に失敗しました') }
     } catch { setMsg('通信エラー') } finally { setSaving(false) }
   }
+
+  // ── 妊娠中の牛（カウントダウン順）
+  const pregnantCows = cows
+    .filter(c => c.status==='妊娠中' && c.expected_birth)
+    .sort((a,b) => new Date(a.expected_birth).getTime() - new Date(b.expected_birth).getTime())
 
   const tabs = [['cows','母牛台帳'],['bulls','種牛台帳'],['records','分娩記録']] as const
   const btnLabel = tab==='cows'?'＋ 母牛登録':tab==='bulls'?'＋ 種牛登録':'＋ 分娩登録'
@@ -111,21 +262,76 @@ export default function BreedingPage() {
     <>
       <Head><title>繁殖・分娩管理 | 牧場管理システム</title></Head>
       <style>{`@media(max-width:640px){.tbl{display:none!important}.cds{display:flex!important}}@media(min-width:641px){.cds{display:none!important}}`}</style>
+
+      {/* 授精記録モーダル */}
+      {insemTarget && (
+        <InsemModal
+          cow={insemTarget}
+          bulls={bulls}
+          onClose={() => setInsemTarget(null)}
+          onSave={handleInsemSave}
+        />
+      )}
+
       <main style={{padding:16,fontFamily:'sans-serif',background:'#F0F4F8',minHeight:'calc(100vh - 48px)'}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:8}}>
           <h1 style={{fontSize:18,fontWeight:600,color:'#1D3557',margin:0}}>繁殖・分娩管理</h1>
           <button onClick={()=>router.push('/')} style={{padding:'7px 14px',borderRadius:8,border:'1px solid #C8D0DC',background:'#fff',cursor:'pointer',fontSize:13}}>← 戻る</button>
         </div>
 
-        {/* サマリー */}
+        {/* サマリーカード */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:10,marginBottom:14}}>
-          {[['母牛数',cows.length+'頭','#1D3557'],['妊娠中',cows.filter(c=>c.status==='妊娠中').length+'頭','#1D9E75'],['授精待ち',cows.filter(c=>c.status==='授精待ち').length+'頭','#BA7517'],['今年分娩',records.filter(r=>r.birth_date?.startsWith('2026')).length+'頭','#534AB7']].map(([l,v,col])=>(
-            <div key={l} style={{background:'#fff',borderRadius:10,border:'0.5px solid #D0D7E0',padding:'12px 14px'}}>
+          {[
+            ['母牛数',    cows.length+'頭',                                                             '#1D3557'],
+            ['妊娠中',    cows.filter(c=>c.status==='妊娠中').length+'頭',                              '#1D9E75'],
+            ['授精待ち',  cows.filter(c=>c.status==='授精待ち'||c.status==='空胎中').length+'頭',       '#BA7517'],
+            ['今年分娩',  records.filter(r=>r.birth_date?.startsWith(new Date().getFullYear().toString())).length+'頭', '#534AB7'],
+          ].map(([l,v,col])=>(
+            <div key={l as string} style={{background:'#fff',borderRadius:10,border:'0.5px solid #D0D7E0',padding:'12px 14px'}}>
               <div style={{fontSize:11,color:'#888'}}>{l}</div>
               <div style={{fontSize:18,fontWeight:600,color:col as string,marginTop:2}}>{v}</div>
             </div>
           ))}
         </div>
+
+        {/* 分娩予定カウントダウン一覧（妊娠中の牛がいる場合） */}
+        {pregnantCows.length > 0 && (
+          <div style={{background:'#fff',borderRadius:12,border:'1px solid #BAE6FD',padding:'14px 16px',marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:600,color:'#0369A1',marginBottom:10}}>🗓️ 分娩予定カウントダウン</div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {pregnantCows.map(c => {
+                const days = calcCountdown(c.expected_birth)
+                const urgent = days !== null && days <= 14
+                return (
+                  <div key={c.id} style={{
+                    display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,
+                    padding:'10px 14px',borderRadius:9,
+                    background: urgent ? '#FFFBEB' : '#F8FAFC',
+                    border: urgent ? '1px solid #FCD34D' : '1px solid #E0E6ED',
+                  }}>
+                    <div style={{display:'flex',alignItems:'center',gap:12}}>
+                      <div>
+                        <div style={{fontWeight:600,fontSize:14}}>{c.farm_id||c.ear_tag_no}</div>
+                        <div style={{fontSize:11,color:'#6B7280'}}>{c.breed} / {c.parity}産 / 授精日: {c.last_insem_date||'—'}</div>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:12}}>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontSize:11,color:'#6B7280'}}>分娩予定日</div>
+                        <div style={{fontSize:13,fontWeight:500}}>{c.expected_birth}</div>
+                      </div>
+                      <CountdownBadge expectedBirth={c.expected_birth} />
+                      <button onClick={() => setInsemTarget(c)}
+                        style={{padding:'5px 12px',borderRadius:7,border:'1px solid #C8D0DC',background:'#fff',cursor:'pointer',fontSize:12,color:'#374151'}}>
+                        授精更新
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* タブ */}
         <div style={{display:'flex',borderBottom:'1px solid #D0D7E0',marginBottom:14,overflowX:'auto'}}>
@@ -150,12 +356,27 @@ export default function BreedingPage() {
           <div style={{background:'#fff',borderRadius:12,border:'2px solid #1D9E75',padding:20,marginBottom:14}}>
             <h2 style={{fontSize:15,fontWeight:600,color:'#1D3557',marginBottom:14}}>母牛新規登録</h2>
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'0 16px'}}>
-              {[['耳標番号 *','ear_tag_no','text'],['農場内管理番号','farm_id','text'],['生年月日','date_of_birth','date'],['最終授精日','last_insem_date','date'],['分娩予定日','expected_birth','date']].map(([lbl,key,type])=>(
+              {[['耳標番号 *','ear_tag_no','text'],['農場内管理番号','farm_id','text'],['生年月日','date_of_birth','date']].map(([lbl,key,type])=>(
                 <div key={key} style={{marginBottom:12}}>
                   <label style={S.label}>{lbl}</label>
                   <input type={type} style={S.input} value={cowForm[key]} onChange={e=>setCow(key,e.target.value)}/>
                 </div>
               ))}
+              {/* 最終授精日 → 分娩予定日自動計算 */}
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>最終授精日</label>
+                <input type="date" style={S.input} value={cowForm.last_insem_date} onChange={e => handleInsemDateChange(e.target.value)}/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>分娩予定日 <span style={{color:'#1D9E75',fontSize:11}}>(授精日+{GESTATION}日 自動計算)</span></label>
+                <input type="date" style={{...S.input, background:'#F0F9FF', color: cowForm.expected_birth?'#0369A1':'#9CA3AF'}}
+                  value={cowForm.expected_birth} onChange={e=>setCow('expected_birth',e.target.value)}/>
+                {cowForm.expected_birth && (
+                  <div style={{marginTop:4,display:'flex',alignItems:'center',gap:8}}>
+                    <CountdownBadge expectedBirth={cowForm.expected_birth} />
+                  </div>
+                )}
+              </div>
               <div style={{marginBottom:12}}>
                 <label style={S.label}>品種</label>
                 <select style={S.select} value={cowForm.breed} onChange={e=>setCow('breed',e.target.value)}>
@@ -277,6 +498,7 @@ export default function BreedingPage() {
               <div style={{marginBottom:12}}>
                 <label style={S.label}>担当者</label>
                 <select style={S.select} value={birthForm.staffId} onChange={e=>setBirth('staffId',e.target.value)}>
+                  <option value="">未選択</option>
                   {staff.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
@@ -305,42 +527,67 @@ export default function BreedingPage() {
             <div className="tbl" style={{background:'#fff',borderRadius:12,border:'0.5px solid #D0D7E0',overflow:'auto'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                 <thead><tr style={{background:'#F4F6F8'}}>
-                  {['管理番号','品種','産次','ステータス','授精日','分娩予定','種牛','牛舎'].map(h=>(
+                  {['管理番号','品種','産次','ステータス','最終授精日','分娩予定日','残日数','種牛','操作'].map(h=>(
                     <th key={h} style={{padding:'10px 14px',textAlign:'left',fontWeight:500,color:'#555',borderBottom:'1px solid #E0E6ED',whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
-                  {cows.length===0&&<tr><td colSpan={8} style={{padding:32,textAlign:'center',color:'#888'}}>母牛が登録されていません</td></tr>}
+                  {cows.length===0&&<tr><td colSpan={9} style={{padding:32,textAlign:'center',color:'#888'}}>母牛が登録されていません</td></tr>}
                   {cows.map((c,i)=>{
                     const [col,bg]=cowStatusColor[c.status]??['#888','#eee']
-                    return(<tr key={c.id} style={{background:i%2===0?'#fff':'#FAFBFC'}}>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3',fontWeight:600}}>{c.farm_id||c.ear_tag_no}</td>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.breed||'—'}</td>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.parity}産</td>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}><span style={{fontSize:11,padding:'3px 10px',borderRadius:99,background:bg,color:col,fontWeight:500}}>{c.status}</span></td>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.last_insem_date||'—'}</td>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.expected_birth||'—'}</td>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3',color:'#888'}}>{c.bull_name||'—'}</td>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.barn_name||'—'}</td>
-                    </tr>)
+                    return(
+                      <tr key={c.id} style={{background:i%2===0?'#fff':'#FAFBFC'}}>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3',fontWeight:600}}>{c.farm_id||c.ear_tag_no}</td>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.breed||'—'}</td>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.parity}産</td>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>
+                          <span style={{fontSize:11,padding:'3px 10px',borderRadius:99,background:bg,color:col,fontWeight:500}}>{c.status}</span>
+                        </td>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.last_insem_date||'—'}</td>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{c.expected_birth||'—'}</td>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>
+                          {c.expected_birth ? <CountdownBadge expectedBirth={c.expected_birth}/> : <span style={{color:'#9CA3AF'}}>—</span>}
+                        </td>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3',color:'#888'}}>{c.bull_name||'—'}</td>
+                        <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>
+                          <button onClick={() => setInsemTarget(c)}
+                            style={{padding:'4px 10px',borderRadius:6,border:'1px solid #1D9E75',background:'#E1F5EE',color:'#085041',cursor:'pointer',fontSize:12,fontWeight:500}}>
+                            授精記録
+                          </button>
+                        </td>
+                      </tr>
+                    )
                   })}
                 </tbody>
               </table>
             </div>
+            {/* モバイルカード */}
             <div className="cds" style={{flexDirection:'column',gap:10}}>
               {cows.map(c=>{
                 const [col,bg]=cowStatusColor[c.status]??['#888','#eee']
-                return(<div key={c.id} style={{background:'#fff',borderRadius:12,border:'0.5px solid #D0D7E0',padding:'14px 16px'}}>
-                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
-                    <div><span style={{fontWeight:600,fontSize:15}}>{c.farm_id||c.ear_tag_no}</span><span style={{fontSize:12,color:'#888',marginLeft:8}}>{c.parity}産</span></div>
-                    <span style={{fontSize:11,padding:'3px 10px',borderRadius:99,background:bg,color:col,fontWeight:500}}>{c.status}</span>
+                return(
+                  <div key={c.id} style={{background:'#fff',borderRadius:12,border:'0.5px solid #D0D7E0',padding:'14px 16px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+                      <div><span style={{fontWeight:600,fontSize:15}}>{c.farm_id||c.ear_tag_no}</span><span style={{fontSize:12,color:'#888',marginLeft:8}}>{c.parity}産</span></div>
+                      <span style={{fontSize:11,padding:'3px 10px',borderRadius:99,background:bg,color:col,fontWeight:500}}>{c.status}</span>
+                    </div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:13,marginBottom:10}}>
+                      {[['品種',c.breed||'—'],['種牛',c.bull_name||'—'],['最終授精日',c.last_insem_date||'—'],['分娩予定',c.expected_birth||'—']].map(([l,v])=>(
+                        <div key={l}><span style={{fontSize:11,color:'#888'}}>{l}</span><div>{v}</div></div>
+                      ))}
+                    </div>
+                    {c.expected_birth && (
+                      <div style={{marginBottom:10,display:'flex',gap:8,alignItems:'center'}}>
+                        <span style={{fontSize:11,color:'#6B7280'}}>残日数:</span>
+                        <CountdownBadge expectedBirth={c.expected_birth}/>
+                      </div>
+                    )}
+                    <button onClick={() => setInsemTarget(c)}
+                      style={{width:'100%',padding:'8px',borderRadius:8,border:'1px solid #1D9E75',background:'#E1F5EE',color:'#085041',cursor:'pointer',fontSize:13,fontWeight:500}}>
+                      授精記録を入力
+                    </button>
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:13}}>
-                    {[['品種',c.breed||'—'],['種牛',c.bull_name||'—'],['授精日',c.last_insem_date||'—'],['分娩予定',c.expected_birth||'—']].map(([l,v])=>(
-                      <div key={l}><span style={{fontSize:11,color:'#888'}}>{l}</span><div>{v}</div></div>
-                    ))}
-                  </div>
-                </div>)
+                )
               })}
             </div>
           </>
@@ -363,7 +610,9 @@ export default function BreedingPage() {
                       <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3',fontWeight:600}}>{b.name}</td>
                       <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3',color:'#888'}}>{b.reg_no||'—'}</td>
                       <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{b.breed||'—'}</td>
-                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}><span style={{fontSize:11,padding:'3px 10px',borderRadius:99,background:b.type==='自家保有'?'#E1F5EE':'#E6F1FB',color:b.type==='自家保有'?'#1D9E75':'#378ADD',fontWeight:500}}>{b.type}</span></td>
+                      <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>
+                        <span style={{fontSize:11,padding:'3px 10px',borderRadius:99,background:b.type==='自家保有'?'#E1F5EE':'#E6F1FB',color:b.type==='自家保有'?'#1D9E75':'#378ADD',fontWeight:500}}>{b.type}</span>
+                      </td>
                       <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3',color:'#888'}}>{b.owner||'—'}</td>
                       <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3'}}>{b.bms||'—'}</td>
                       <td style={{padding:'10px 14px',borderBottom:'1px solid #EEF0F3',color:'#888',fontSize:12}}>{b.note||'—'}</td>
