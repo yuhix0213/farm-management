@@ -641,8 +641,6 @@ function CattleDetail({cattle,weights,healthRecords,barns,staff,onAddWeight,onAd
     </div>
   )
 }
-  )
-}
 
 export default function CattlePage() {
   const [cattle,   setCattle]   = useState<any[]>([])
