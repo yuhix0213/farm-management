@@ -366,25 +366,90 @@ function AiAdvisor({cattle,weights,healthRecords}:{cattle:any,weights:any[],heal
   )
 }
 
-function CattleDetail({cattle,weights,healthRecords,barns,staff,onAddWeight,onAddHealth,onEdit,onClose}:any) {
+// ── 繁殖ユーティリティ ────────────────────────────────────────────
+const GESTATION = 285
+const calcExpected = (d:string) => { if(!d)return''; const x=new Date(d); x.setDate(x.getDate()+GESTATION); return x.toISOString().slice(0,10) }
+const calcDays = (exp:string):number|null => { if(!exp)return null; const t=new Date(); t.setHours(0,0,0,0); const e=new Date(exp); e.setHours(0,0,0,0); return Math.round((e.getTime()-t.getTime())/86400000) }
+
+function BreedingBadge({days}:{days:number|null}) {
+  if(days===null) return null
+  const [col,bg,txt] = days<0?['#E24B4A','#FCEBEB',`${Math.abs(days)}日超過`]:days===0?['#E24B4A','#FCEBEB','本日！']:days<=7?['#E24B4A','#FCEBEB',`あと${days}日🚨`]:days<=21?['#BA7517','#FAEEDA',`あと${days}日⚠️`]:['#1D9E75','#E1F5EE',`あと${days}日`]
+  return <span style={{fontSize:11,padding:'3px 9px',borderRadius:99,background:bg,color:col,fontWeight:600}}>{txt}</span>
+}
+
+function CattleDetail({cattle,weights,healthRecords,barns,staff,onAddWeight,onAddHealth,onEdit,onClose,onRefresh}:any) {
   const [tab,setTab] = useState("info")
   const [modal,setModal] = useState("none")
   const ws = [...weights].filter((w:any)=>w.cattle_id===cattle.id).sort((a:any,b:any)=>b.measured_at.localeCompare(a.measured_at))
   const hs = [...healthRecords].filter((h:any)=>h.cattle_id===cattle.id).sort((a:any,b:any)=>b.record_date.localeCompare(a.record_date))
   const lw = ws[0]
-  const TABS = [["info","基本情報"],["weight","体重履歴"],["health","健康記録"],["ai","🩺 AI診断"]]
+  const isFemale  = cattle.sex==='雌'
+  const TABS:[string,string][] = [["info","基本情報"],["weight","体重履歴"],["health","健康記録"],...(isFemale?[["breeding","🐄 繁殖"]]:[] as [string,string][]),["ai","🩺 AI診断"]]
   const staffName = staff.find((s:any)=>s.id===cattle.staff_id)?.name||"—"
   const barnName  = barns.find((b:any)=>b.id===cattle.barn_id)?.name||"—"
 
+  // 繁殖タブ用state
+  const [bulls,    setBulls]    = useState<any[]>([])
+  const [cowRec,   setCowRec]   = useState<any>(null)
+  const [insemDate,setInsemDate]= useState('')
+  const [bullId,   setBullId]   = useState('')
+  const [insemNote,setInsemNote]= useState('')
+  const [bSaving,  setBSaving]  = useState(false)
+  const [bMsg,     setBMsg]     = useState('')
+  const [birthRecs,setBirthRecs]= useState<any[]>([])
+
+  useEffect(()=>{
+    if(tab!=='breeding') return
+    fetch('/api/breeding/bulls').then(r=>r.json()).then((d:any)=>setBulls(Array.isArray(d)?d:[]))
+    fetch('/api/breeding/cows').then(r=>r.json()).then((d:any)=>{
+      if(!Array.isArray(d))return
+      const found = d.find((c:any)=>c.ear_tag_no===cattle.ear_tag_no)
+      setCowRec(found||null)
+      if(found){ setInsemDate(found.last_insem_date||''); setBullId(String(found.bull_id||'')) }
+    })
+    fetch('/api/breeding/records').then(r=>r.json()).then((d:any)=>{
+      if(!Array.isArray(d))return
+      setBirthRecs(d.filter((r:any)=>r.cow_ear_tag===cattle.ear_tag_no||r.cow_farm_id===cattle.farm_id))
+    })
+  },[tab])
+
+  const expectedBirth = calcExpected(insemDate)
+  const countdown     = calcDays(expectedBirth)
+
+  const saveInsem = async () => {
+    if(!insemDate){ setBMsg('授精日を入力してください'); return }
+    setBSaving(true); setBMsg('')
+    try {
+      let ok = false
+      if(cowRec) {
+        const res = await fetch('/api/breeding/cows',{method:'PUT',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({...cowRec,bull_id:bullId||null,last_insem_date:insemDate,expected_birth:expectedBirth,status:'妊娠中'})})
+        if(res.ok){ const d=await res.json(); setCowRec(d); setBMsg('✅ 授精記録を更新しました'); ok=true }
+        else { const d=await res.json(); setBMsg('❌ '+(d.error||'更新失敗')) }
+      } else {
+        const res = await fetch('/api/breeding/cows',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ear_tag_no:cattle.ear_tag_no,farm_id:cattle.farm_id,breed:cattle.breed,
+            date_of_birth:cattle.date_of_birth,status:'妊娠中',parity:0,
+            bull_id:bullId||null,last_insem_date:insemDate,expected_birth:expectedBirth,
+            barn_id:cattle.barn_id||null,note:insemNote||''})})
+        if(res.ok){ const d=await res.json(); setCowRec(d); setBMsg('✅ 母牛台帳に登録し、授精記録を保存しました'); ok=true }
+        else { const d=await res.json(); setBMsg('❌ '+(d.error||'登録失敗')) }
+      }
+      if(ok){
+        await fetch(`/api/cattle/${cattle.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({...cattle,status:'繁殖中'})})
+        onRefresh()
+      }
+    } catch { setBMsg('❌ 通信エラー') } finally { setBSaving(false) }
+  }
+
   const saveWeight = async (f:any) => {
     const res = await fetch('/api/weight',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(f)})
-    if(res.ok){ setModal("none"); onAddWeight() }
-    else alert('体重記録に失敗しました')
+    if(res.ok){ setModal("none"); onAddWeight() } else alert('体重記録に失敗しました')
   }
   const saveHealth = async (f:any) => {
     const res = await fetch('/api/health',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(f)})
-    if(res.ok){ setModal("none"); onAddHealth() }
-    else alert('健康記録に失敗しました')
+    if(res.ok){ setModal("none"); onAddHealth() } else alert('健康記録に失敗しました')
   }
 
   return (
@@ -397,6 +462,7 @@ function CattleDetail({cattle,weights,healthRecords,barns,staff,onAddWeight,onAd
           <span style={{fontSize:15,fontWeight:500,color:"#111827"}}>{cattle.farm_id||cattle.ear_tag_no}</span>
           <span style={{fontSize:12,color:"#6B7280"}}>{cattle.ear_tag_no}</span>
           <span style={S.badge(statusColor[cattle.status]||"#888",statusBg[cattle.status]||"#eee")}>{cattle.status}</span>
+          {isFemale && cowRec?.expected_birth && <BreedingBadge days={calcDays(cowRec.expected_birth)}/>}
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <button style={S.btnSm} onClick={onEdit}>編集</button>
@@ -405,7 +471,7 @@ function CattleDetail({cattle,weights,healthRecords,barns,staff,onAddWeight,onAd
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:14}}>
-        {[["品種",cattle.breed],["月齢",cattle.date_of_birth?calcAge(cattle.date_of_birth)+"ヶ月":"—"],["現体重",lw?lw.weight_kg+"kg":"未記録"],["日増体量",lw?.adg_kg!=null?Number(lw.adg_kg).toFixed(2)+"kg/日":"—"]].map(([l,v])=>(
+        {[["品種",cattle.breed],["月齢",cattle.date_of_birth?calcAge(cattle.date_of_birth)+"ヶ月":"—"],["現体重",lw?lw.weight_kg+"kg":"未記録"],["日増体量",lw?.adg_kg!=null?Number(lw.adg_kg).toFixed(2)+"kg/日":"—"],...(isFemale&&cowRec?[["分娩予定",cowRec.expected_birth||"—"]]:[] as [string,string][])].map(([l,v])=>(
           <div key={l as string} style={{background:"#F9FAFB",borderRadius:8,padding:"10px 12px"}}>
             <div style={{fontSize:11,color:"#9CA3AF"}}>{l}</div>
             <div style={{fontSize:14,fontWeight:500,marginTop:3,color:"#111827"}}>{v}</div>
@@ -428,6 +494,11 @@ function CattleDetail({cattle,weights,healthRecords,barns,staff,onAddWeight,onAd
               ))}
             </tbody>
           </table>
+          {isFemale && !cowRec && (
+            <div style={{marginTop:14,padding:'10px 14px',background:'#FEF9E7',border:'1px solid #FCD34D',borderRadius:9,fontSize:13}}>
+              💡 この個体はメス牛です。<button onClick={()=>setTab('breeding')} style={{color:'#1D9E75',background:'none',border:'none',cursor:'pointer',fontWeight:600,fontSize:13,padding:0,textDecoration:'underline'}}>繁殖タブ</button>から授精記録を登録すると母牛台帳に自動追加されます。
+            </div>
+          )}
         </div>
       )}
 
@@ -481,8 +552,95 @@ function CattleDetail({cattle,weights,healthRecords,barns,staff,onAddWeight,onAd
         </>
       )}
 
+      {tab==="breeding"&&isFemale&&(
+        <div>
+          {/* 母牛台帳登録状況 */}
+          <div style={{marginBottom:14,padding:'10px 14px',borderRadius:9,
+            background:cowRec?'#E1F5EE':'#FEF9E7',
+            border:`1px solid ${cowRec?'#A7F3D0':'#FCD34D'}`}}>
+            {cowRec
+              ? <span style={{fontSize:13,color:'#085041'}}>✅ 母牛台帳に登録済（ステータス: {cowRec.status} / {cowRec.parity}産）</span>
+              : <span style={{fontSize:13,color:'#92400E'}}>⚠️ まだ母牛台帳に登録されていません。授精日を入力して保存すると自動登録されます。</span>
+            }
+          </div>
+
+          {/* 授精記録入力 */}
+          <div style={{background:'#F9FAFB',borderRadius:10,padding:'16px',marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:600,color:'#1D3557',marginBottom:12}}>📝 授精記録</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 16px'}}>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>最終授精日 *</label>
+                <input type="date" style={S.input} value={insemDate} onChange={e=>{ setInsemDate(e.target.value); setBMsg('') }}/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>使用種牛</label>
+                <select style={S.select} value={bullId} onChange={e=>setBullId(e.target.value)}>
+                  <option value="">未選択</option>
+                  {bulls.map((b:any)=><option key={b.id} value={b.id}>{b.name}（{b.breed}）</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* 分娩予定日の自動計算表示 */}
+            {insemDate && (
+              <div style={{marginBottom:12,padding:'12px 16px',background:'#F0F9FF',border:'1px solid #BAE6FD',borderRadius:9,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+                <div>
+                  <div style={{fontSize:11,color:'#0369A1',marginBottom:2}}>📅 分娩予定日（授精日+{GESTATION}日）</div>
+                  <div style={{fontSize:16,fontWeight:700,color:'#1D3557'}}>{expectedBirth}</div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:11,color:'#6B7280',marginBottom:2}}>カウントダウン</div>
+                  <BreedingBadge days={countdown}/>
+                </div>
+              </div>
+            )}
+
+            {!cowRec && (
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>メモ</label>
+                <input style={S.input} value={insemNote} onChange={e=>setInsemNote(e.target.value)} placeholder="例: 初回授精"/>
+              </div>
+            )}
+
+            {bMsg && <div style={{marginBottom:10,fontSize:13,color:bMsg.startsWith('✅')?'#085041':'#A32D2D'}}>{bMsg}</div>}
+
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button onClick={saveInsem} disabled={bSaving||!insemDate}
+                style={{...S.btnPrimary,opacity:bSaving||!insemDate?0.5:1,cursor:bSaving||!insemDate?'not-allowed':'pointer'}}>
+                {bSaving?'保存中...':(cowRec?'授精記録を更新':'母牛台帳に登録して記録')}
+              </button>
+            </div>
+          </div>
+
+          {/* 分娩履歴 */}
+          {birthRecs.length>0&&(
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:'#1D3557',marginBottom:8}}>🐮 分娩履歴（{birthRecs.length}件）</div>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                <thead><tr>
+                  {['分娩日','子牛耳標','性別','生時体重','難産'].map(h=><th key={h} style={S.th}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {birthRecs.map((r:any)=>(
+                    <tr key={r.id}>
+                      <td style={S.td}>{r.birth_date}</td>
+                      <td style={{...S.td,fontWeight:600}}>{r.calf_ear_tag}</td>
+                      <td style={S.td}>{r.calf_sex||'—'}</td>
+                      <td style={S.td}>{r.calf_weight_kg?r.calf_weight_kg+'kg':'—'}</td>
+                      <td style={S.td}>{r.dystocia?<span style={{color:'#E24B4A'}}>⚠️ あり</span>:'なし'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {tab==="ai"&&<AiAdvisor cattle={cattle} weights={weights} healthRecords={healthRecords}/>}
     </div>
+  )
+}
   )
 }
 
@@ -564,7 +722,7 @@ export default function CattlePage() {
           {selected&&modal==="none"&&(
             <CattleDetail cattle={selected} weights={weights} healthRecords={health} barns={barns} staff={staff}
               onAddWeight={load} onAddHealth={load}
-              onEdit={()=>setModal("edit")} onClose={()=>setSelected(null)}/>
+               onEdit={()=>setModal("edit")} onClose={()=>setSelected(null)} onRefresh={load}/>
           )}
 
           {/* 検索・フィルター */}
